@@ -1,18 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="300" height="420" viewBox="0 0 300 420">
   <defs>
     <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#1f6feb"/>
-      <stop offset="1" stop-color="#2a7fff"/>
+      <stop offset="0" stop-color="#e23b3b"/>
+      <stop offset="1" stop-color="#b81d1d"/>
     </linearGradient>
-    <pattern id="p" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(25)">
-      <rect width="24" height="24" fill="none"/>
-      <path d="M0 12h24M12 0v24" stroke="rgba(255,255,255,0.25)" stroke-width="2"/>
+    <pattern id="p" width="26" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="26" height="26" fill="none"/>
+      <circle cx="13" cy="13" r="3" fill="rgba(255,215,94,0.45)"/>
     </pattern>
     <filter id="s" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="rgba(0,0,0,0.25)"/>
     </filter>
   </defs>
   <rect x="10" y="10" width="280" height="400" rx="26" fill="url(#g)" filter="url(#s)"/>
-  <rect x="24" y="24" width="252" height="372" rx="18" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="4"/>
-  <rect x="30" y="30" width="240" height="360" rx="14" fill="url(#p)"/>
+  <rect x="22" y="22" width="256" height="376" rx="18" fill="none" stroke="#ffd75e" stroke-width="6"/>
+  <rect x="34" y="34" width="232" height="352" rx="12" fill="url(#p)"/>
+  <circle cx="150" cy="210" r="56" fill="#ffd75e"/>
+  <circle cx="150" cy="210" r="48" fill="#b81d1d"/>
+  <text x="150" y="232" text-anchor="middle" font-family="'PingFang SC', sans-serif" font-size="56" font-weight="900" fill="#ffd75e">乐</text>
 </svg>

@@ -10,8 +10,11 @@ type Props = {
   pot: number
   stage: string
   youSeat?: number
+  youId?: string
   youHole?: string[]
   lastEvent?: LastEvent | null
+  onKickPlayer?: (player: PublicPlayer) => void
+  hostId?: string
 }
 
 function seatPositions(maxPlayers: number) {
@@ -43,8 +46,11 @@ export function TableScene({
   pot,
   stage,
   youSeat,
+  youId,
   youHole,
   lastEvent,
+  onKickPlayer,
+  hostId,
 }: Props) {
   const pos = seatPositions(maxPlayers)
   const bySeat = new Map<number, PublicPlayer>()
@@ -124,6 +130,9 @@ export function TableScene({
             y={p.y}
             cards={cards}
             bubble={bubble}
+            isHost={!!player && player.id === hostId}
+            canKick={!!player && hostId === youId && player.id !== youId}
+            onKick={onKickPlayer}
           />
         )
       })}
