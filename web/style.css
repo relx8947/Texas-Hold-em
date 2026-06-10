@@ -1,0 +1,284 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #0c1218;
+  color: #e6edf3;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 32px auto 80px;
+  padding: 0 20px;
+}
+
+header {
+  margin-bottom: 24px;
+}
+
+header h1 {
+  margin: 0 0 8px;
+  font-size: 32px;
+}
+
+header p {
+  margin: 0;
+  color: #9fb0c0;
+}
+
+.panel {
+  background: #121a23;
+  border: 1px solid #1f2a36;
+  padding: 20px;
+  margin-bottom: 20px;
+  border-radius: 14px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 20px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  color: #9fb0c0;
+}
+
+input {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #22303d;
+  background: #0b1118;
+  color: #e6edf3;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  background: #1f6feb;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #2a7fff;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.status {
+  margin-top: 12px;
+  color: #9fb0c0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background: #22303d;
+}
+
+.table {
+  display: grid;
+  gap: 12px;
+}
+
+.community .cards {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.card {
+  width: 62px;
+  height: 86px;
+  background: #f8fafc;
+  border: 1px solid #d0d7de;
+  border-radius: 10px;
+  color: #0b1118;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+
+.card.red {
+  color: #d92d20;
+}
+
+.card .rank {
+  position: absolute;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.card .rank.top {
+  top: 6px;
+  left: 6px;
+}
+
+.card .rank.bottom {
+  bottom: 6px;
+  right: 6px;
+  transform: rotate(180deg);
+}
+
+.card .suit {
+  font-size: 26px;
+}
+
+.card.back {
+  background: linear-gradient(135deg, #1f6feb, #2a7fff);
+  border-color: #2a7fff;
+  color: transparent;
+}
+
+.card.back::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+}
+
+.players {
+  margin-top: 20px;
+}
+
+.player {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0b1118;
+  border: 1px solid #1f2a36;
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr auto;
+  gap: 8px;
+}
+
+.player .name {
+  font-weight: 700;
+}
+
+.player .tag {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #1f2a36;
+  color: #9fb0c0;
+  margin-left: 6px;
+}
+
+.player.current {
+  border-color: #2a7fff;
+  box-shadow: 0 0 0 1px #2a7fff inset;
+}
+
+.player .mini {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: #b42318;
+}
+
+.player .mini:hover {
+  background: #d92d20;
+}
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.hint {
+  color: #9fb0c0;
+  font-size: 14px;
+}
+
+.room-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 12px;
+}
+
+.room-card {
+  background: #0b1118;
+  border: 1px solid #1f2a36;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.room-title {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.room-meta {
+  color: #9fb0c0;
+  font-size: 13px;
+}
+
+.room-card button {
+  justify-self: start;
+}
+
+.chat {
+  max-height: 220px;
+  overflow-y: auto;
+  background: #0b1118;
+  border: 1px solid #1f2a36;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.chat-item {
+  margin-bottom: 6px;
+}
+
+.log {
+  max-height: 220px;
+  overflow-y: auto;
+  background: #0b1118;
+  border: 1px solid #1f2a36;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 13px;
+}
+
+.log .item {
+  margin-bottom: 6px;
+}

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <defs>
+    <radialGradient id="felt" cx="50%" cy="40%" r="75%">
+      <stop offset="0" stop-color="#146a3b"/>
+      <stop offset="1" stop-color="#0b3d25"/>
+    </radialGradient>
+    <pattern id="noise" width="40" height="40" patternUnits="userSpaceOnUse">
+      <rect width="40" height="40" fill="none"/>
+      <circle cx="6" cy="10" r="1" fill="rgba(255,255,255,0.05)"/>
+      <circle cx="18" cy="22" r="1" fill="rgba(255,255,255,0.04)"/>
+      <circle cx="30" cy="16" r="1" fill="rgba(255,255,255,0.03)"/>
+      <circle cx="26" cy="34" r="1" fill="rgba(255,255,255,0.04)"/>
+      <circle cx="10" cy="32" r="1" fill="rgba(0,0,0,0.06)"/>
+      <circle cx="34" cy="6" r="1" fill="rgba(0,0,0,0.05)"/>
+    </pattern>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="rgba(0,0,0,0.4)"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="700" fill="url(#felt)"/>
+  <rect width="1200" height="700" fill="url(#noise)" opacity="0.9"/>
+  <ellipse cx="600" cy="360" rx="470" ry="260" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="10" filter="url(#shadow)"/>
+  <ellipse cx="600" cy="360" rx="430" ry="230" fill="none" stroke="rgba(0,0,0,0.22)" stroke-width="6"/>
+</svg>

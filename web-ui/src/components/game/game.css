@@ -1,0 +1,479 @@
+.tableStage {
+  position: relative;
+  width: min(1100px, 96vw);
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  border-radius: 40px;
+  border: 1px solid #2e3a45;
+  overflow: hidden;
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    inset 0 0 60px rgba(0, 0, 0, 0.4);
+  background: #0b3d25 url('/assets/table-felt.svg') center / cover no-repeat;
+}
+
+.tableOverlay {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(800px 500px at 50% 40%, rgba(255, 255, 255, 0.05), transparent 70%);
+  pointer-events: none;
+}
+
+.seat {
+  position: absolute;
+  width: 120px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  z-index: 10;
+}
+
+.seatCards {
+  position: absolute;
+  top: -60px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s;
+}
+
+.seat.current .seatCards {
+  transform: translateY(-5px);
+}
+
+.seatCards .cardFlip,
+.seatCards .cardBack {
+  width: 48px;
+  height: 68px;
+  border-radius: 6px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.seatMain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.avatarRing {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.3s;
+}
+
+.seat.current .avatarRing {
+  box-shadow: 0 0 0 3px #f7d16e, 0 0 20px rgba(247, 209, 110, 0.5);
+}
+
+.avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 24px;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
+}
+
+.dealerBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  color: #000;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  z-index: 2;
+  border: 1px solid #ccc;
+}
+
+.seatInfo {
+  margin-top: -12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  z-index: 2;
+}
+
+.namePill {
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chipsPill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(180deg, #3d4a57, #1f2831);
+  color: #f0f0f0;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.chipsPill.empty {
+  background: rgba(0, 0, 0, 0.5);
+  color: #aaa;
+}
+
+.chipIcon {
+  color: #f7d16e;
+  font-size: 10px;
+}
+
+.seatStatus {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.statusTag {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+}
+
+.statusTag.off {
+  background: #333;
+  color: #999;
+  border: 1px solid #555;
+}
+
+.statusTag.out {
+  background: #555;
+  color: #ccc;
+}
+
+.statusTag.allin {
+  background: #d92d20;
+  color: #fff;
+  border: 1px solid #ff5555;
+  box-shadow: 0 0 10px rgba(217, 45, 32, 0.5);
+}
+
+.statusTag.fold {
+  background: rgba(0, 0, 0, 0.7);
+  color: #aaa;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.betTag {
+  position: absolute;
+  top: 40px;
+  background: rgba(247, 209, 110, 0.9);
+  color: #333;
+  font-weight: 900;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  border: 1px solid #fff;
+  white-space: nowrap;
+}
+
+.seat.folded {
+  opacity: 0.6;
+  filter: grayscale(0.8);
+}
+
+.tableCenter {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  width: 60%;
+}
+
+.communityRow {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  height: 96px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.potRow {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+}
+
+.potChip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #f7d16e, #d4a017);
+  border: 1px solid #fff;
+  color: #4a3300;
+  font-weight: 900;
+  font-size: 13px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.cardFlip {
+  width: 60px;
+  height: 86px;
+  border-radius: 8px;
+  perspective: 800px;
+  transform-origin: 50% 70%;
+}
+
+.cardInner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 260ms ease;
+}
+
+.cardFlip.down .cardInner {
+  transform: rotateY(180deg);
+}
+
+.cardFace,
+.cardBackSide {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  backface-visibility: hidden;
+  overflow: hidden;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  border: 1px solid #ddd;
+}
+
+.cardFace svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cardBackSide {
+  background: url('/assets/card-back.svg') center / cover no-repeat;
+  transform: rotateY(180deg);
+  border: 1px solid #fff;
+}
+
+.cardBack {
+  background: url('/assets/card-back.svg') center / cover no-repeat;
+  border-radius: 8px;
+  width: 60px;
+  height: 86px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  border: 1px solid #fff;
+}
+
+.deck {
+  display: none;
+}
+
+.deck .label {
+  font-weight: 700;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+@keyframes popIn {
+  from {
+    transform: translateY(10px) scale(0.92);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes potPulse {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 20px rgba(247, 209, 110, 0.6);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.cardFlip,
+.cardBack {
+  animation: dealFly 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes dealFly {
+  from {
+    transform: translate(-200px, -200px) scale(0.5);
+    opacity: 0;
+  }
+
+  to {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+.potChip {
+  animation: potPulse 1s ease-out infinite;
+  animation-play-state: paused;
+}
+
+.potChip:not(:empty) {
+  animation-play-state: running;
+}
+
+.actionBubble {
+  position: absolute;
+  top: -40px;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: #fff;
+  color: #333;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: popIn 220ms ease-out;
+  z-index: 30;
+}
+
+.actionBubble::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: #fff;
+}
+
+.actionBar {
+  width: min(1000px, 94vw);
+  margin: 16px auto 0;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(30, 40, 50, 0.9), rgba(20, 25, 30, 0.95));
+  backdrop-filter: blur(20px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  padding: 16px 20px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.actionInfo .title {
+  font-weight: 800;
+  color: #fff;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+}
+
+.actionInfo .meta {
+  margin-top: 4px;
+  color: #aaa;
+  font-size: 12px;
+}
+
+.actionRight {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.raiseBox {
+  display: grid;
+  gap: 12px;
+  min-width: min(500px, 85vw);
+}
+
+.quickRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sliderRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sliderRow input[type='range'] {
+  width: min(240px, 40vw);
+  accent-color: #f7d16e;
+}
+
+.valuePill {
+  color: #f7d16e;
+  font-weight: 700;
+  min-width: 40px;
+  text-align: right;
+}

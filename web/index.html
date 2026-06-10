@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>德州扑克局域网</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>局域网德州扑克</h1>
+        <p>前后端分离 · Web 前端 + Go 服务端</p>
+      </header>
+
+      <section class="panel">
+        <h2>连接与房间</h2>
+        <div class="grid">
+          <label>
+            服务器地址
+            <input id="serverUrl" placeholder="ws://192.168.1.10:8080/ws" />
+          </label>
+          <label>
+            昵称
+            <input id="playerName" placeholder="请输入昵称" />
+          </label>
+          <label>
+            最大人数
+            <input id="maxPlayers" type="number" min="2" max="10" value="6" />
+          </label>
+          <label>
+            买入筹码
+            <input id="buyIn" type="number" min="1" placeholder="默认 2000" />
+          </label>
+          <label>
+            房间号
+            <input id="roomCode" placeholder="例如 AB12" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="createRoom">创建房间</button>
+          <button id="joinRoom">加入房间</button>
+        </div>
+        <div class="status">
+          <span>房间号：</span><strong id="currentRoom">未加入</strong>
+          <span class="divider"></span>
+          <span>状态：</span><strong id="connectionState">未连接</strong>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>房间列表</h2>
+        <div class="actions">
+          <button id="refreshRooms">刷新列表</button>
+        </div>
+        <div id="roomsList" class="room-list">暂无房间</div>
+      </section>
+
+      <section class="panel">
+        <h2>牌桌</h2>
+        <div class="table">
+          <div class="community">
+            <div class="label">公共牌</div>
+            <div id="communityCards" class="cards"></div>
+          </div>
+          <div class="community">
+            <div class="label">你的手牌</div>
+            <div id="holeCards" class="cards"></div>
+          </div>
+          <div class="pot">
+            底池：<span id="potValue">0</span>
+          </div>
+          <div class="stage">
+            阶段：<span id="stageValue">waiting</span>
+          </div>
+          <div class="stage" id="countdown"></div>
+        </div>
+        <div class="players">
+          <h3>玩家</h3>
+          <div id="playersList"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>行动</h2>
+        <div class="action-row">
+          <button id="startGame">开始牌局</button>
+          <button id="checkCall">过牌/跟注</button>
+          <button id="fold">弃牌</button>
+        </div>
+        <div class="action-row">
+          <input id="betAmount" type="number" min="1" placeholder="下注或加注金额" />
+          <button id="betRaise">下注/加注</button>
+        </div>
+        <div class="action-row">
+          <input id="topUpAmount" type="number" min="1" placeholder="补码金额" />
+          <button id="topUp">补码</button>
+          <button id="sitToggle">离座</button>
+          <button id="leaveRoom">离开房间</button>
+          <button id="dissolveRoom">解散房间</button>
+        </div>
+        <div class="hint" id="actionHint"></div>
+      </section>
+
+      <section class="panel">
+        <h2>房间聊天</h2>
+        <div id="chatList" class="chat"></div>
+        <div class="action-row">
+          <input id="chatInput" placeholder="输入聊天内容" />
+          <button id="chatSend">发送</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>日志</h2>
+        <div id="log" class="log"></div>
+      </section>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

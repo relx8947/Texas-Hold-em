@@ -1,0 +1,280 @@
+.appRoot {
+  min-height: 100vh;
+  padding: 28px 20px 260px;
+  background: radial-gradient(900px 600px at 50% 0%, rgba(31, 111, 235, 0.25), transparent 60%),
+    radial-gradient(900px 700px at 30% 70%, rgba(30, 215, 96, 0.12), transparent 55%),
+    #0c1218;
+  color: #e6edf3;
+}
+
+.header {
+  margin: 0 0 16px;
+}
+
+.title {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+}
+
+.subtitle {
+  margin-top: 6px;
+  color: #9fb0c0;
+  font-size: 14px;
+}
+
+.panel {
+  background: rgba(18, 26, 35, 0.9);
+  border: 1px solid #1f2a36;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(10px);
+}
+
+.panel + .panel {
+  margin-top: 16px;
+}
+
+.panelTitle {
+  font-size: 15px;
+  font-weight: 800;
+  margin-bottom: 12px;
+  color: #e6edf3;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.field .label {
+  font-size: 12px;
+  color: #9fb0c0;
+  margin-bottom: 6px;
+}
+
+input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #22303d;
+  background: #0b1118;
+  color: #e6edf3;
+  outline: none;
+}
+
+input:focus {
+  border-color: #2a7fff;
+  box-shadow: 0 0 0 2px rgba(42, 127, 255, 0.18);
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.row.between {
+  justify-content: space-between;
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.row.small {
+  margin-top: 10px;
+}
+
+.btn {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #1f6feb;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #2a7fff;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.secondary {
+  background: #1f2a36;
+  color: #e6edf3;
+}
+
+.btn.secondary:hover {
+  background: #2a3646;
+}
+
+.btn.danger {
+  background: #b42318;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, #1f6feb, #4c8dff);
+  box-shadow: 0 8px 16px rgba(31, 111, 235, 0.35);
+}
+
+.btn.primary:hover {
+  background: linear-gradient(135deg, #2a7fff, #5aa0ff);
+}
+
+.btn.danger:hover {
+  background: #d92d20;
+}
+
+.btn.tiny {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.pill {
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid #22303d;
+  background: rgba(11, 17, 24, 0.75);
+  color: #9fb0c0;
+  font-size: 12px;
+}
+
+.empty {
+  padding: 18px 12px;
+  color: #9fb0c0;
+  font-size: 13px;
+}
+
+.rooms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.roomCard {
+  border: 1px solid #1f2a36;
+  border-radius: 14px;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  background: rgba(11, 17, 24, 0.75);
+  color: #e6edf3;
+}
+
+.roomCard:hover {
+  border-color: #2a7fff;
+  box-shadow: 0 0 0 1px rgba(42, 127, 255, 0.8) inset;
+}
+
+.roomCode {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.roomMeta {
+  margin-top: 4px;
+  color: #9fb0c0;
+  font-size: 12px;
+}
+
+.tableShell {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  gap: 16px;
+}
+
+.topBar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.playersGrid {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.playerRow {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1.3fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #1f2a36;
+  background: rgba(11, 17, 24, 0.65);
+}
+
+.playerRow.current {
+  border-color: #2a7fff;
+  box-shadow: 0 0 0 1px rgba(42, 127, 255, 0.9) inset;
+}
+
+.playerRow .name {
+  font-weight: 900;
+}
+
+.playerRow .flags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #9fb0c0;
+  font-size: 12px;
+}
+
+.betInput {
+  width: 160px;
+  max-width: 45vw;
+}
+
+.logDock {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  border: 1px solid #1f2a36;
+  border-radius: 16px;
+  background: rgba(11, 17, 24, 0.9);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.logHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #1f2a36;
+  color: #9fb0c0;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.logBody {
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.logLine {
+  font-size: 12px;
+  color: #9fb0c0;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+}

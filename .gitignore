@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Local editor and agent state
+.idea/
+.trae/
+.vscode/
+
+# Node/Vite
+node_modules/
+dist/
+build/
+.vite/
+
+# Go build/test output
+*.test
+*.out
+coverage.out
+
+# Local runtime data
+*.db
+*.db-shm
+*.db-wal
