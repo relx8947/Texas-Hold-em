@@ -20,14 +20,26 @@ type RoomRecord struct {
 
 type PlayerRecord struct {
 	ID             string
+	ProfileID      string
 	RoomCode       string
 	Name           string
+	AvatarSeed     string
 	Seat           int
 	Chips          int
 	Connected      bool
 	SittingOut     bool
 	PendingRemoval bool
 	DisconnectedAt *time.Time
+}
+
+type ProfileRecord struct {
+	ID          string
+	Name        string
+	AvatarSeed  string
+	Chips       int
+	HandsPlayed int
+	HandsWon    int
+	UpdatedAt   time.Time
 }
 
 func NewStorage(path string) (*Storage, error) {
@@ -61,8 +73,10 @@ func (s *Storage) initSchema() error {
 		);`,
 		`CREATE TABLE IF NOT EXISTS players (
 			id TEXT PRIMARY KEY,
+			profile_id TEXT NOT NULL DEFAULT '',
 			room_code TEXT NOT NULL,
 			name TEXT NOT NULL,
+			avatar_seed TEXT NOT NULL DEFAULT '',
 			seat INTEGER NOT NULL,
 			chips INTEGER NOT NULL,
 			connected INTEGER NOT NULL,
@@ -71,6 +85,15 @@ func (s *Storage) initSchema() error {
 			disconnected_at INTEGER
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_players_room ON players(room_code);`,
+		`CREATE TABLE IF NOT EXISTS profiles (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			avatar_seed TEXT NOT NULL,
+			chips INTEGER NOT NULL,
+			hands_played INTEGER NOT NULL,
+			hands_won INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);`,
 		`CREATE TABLE IF NOT EXISTS chat (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			room_code TEXT NOT NULL,
@@ -86,7 +109,45 @@ func (s *Storage) initSchema() error {
 			return err
 		}
 	}
+	if err := s.addColumnIfMissing("players", "avatar_seed", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.addColumnIfMissing("players", "profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(
+		`UPDATE profiles SET chips = ?, updated_at = ? WHERE chips = ? AND hands_played = 0 AND hands_won = 0`,
+		initialProfileChips,
+		time.Now().Unix(),
+		startingChips,
+	); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *Storage) addColumnIfMissing(table string, column string, definition string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
 }
 
 func (s *Storage) UpsertRoom(room RoomSnapshot) error {
@@ -111,11 +172,13 @@ func (s *Storage) UpsertPlayer(roomCode string, player PlayerSnapshot) error {
 		disconnectedAt = player.DisconnectedAt.Unix()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO players (id, room_code, name, seat, chips, connected, sitting_out, pending_removal, disconnected_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO players (id, profile_id, room_code, name, avatar_seed, seat, chips, connected, sitting_out, pending_removal, disconnected_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
+		 profile_id=excluded.profile_id,
 		 room_code=excluded.room_code,
 		 name=excluded.name,
+		 avatar_seed=excluded.avatar_seed,
 		 seat=excluded.seat,
 		 chips=excluded.chips,
 		 connected=excluded.connected,
@@ -123,8 +186,10 @@ func (s *Storage) UpsertPlayer(roomCode string, player PlayerSnapshot) error {
 		 pending_removal=excluded.pending_removal,
 		 disconnected_at=excluded.disconnected_at`,
 		player.ID,
+		player.ProfileID,
 		roomCode,
 		player.Name,
+		player.AvatarSeed,
 		player.Seat,
 		player.Chips,
 		boolToInt(player.Connected),
@@ -133,6 +198,72 @@ func (s *Storage) UpsertPlayer(roomCode string, player PlayerSnapshot) error {
 		disconnectedAt,
 	)
 	return err
+}
+
+func (s *Storage) EnsureProfile(id string, name string, avatarSeed string, chips int) (ProfileRecord, error) {
+	now := time.Now()
+	_, err := s.db.Exec(
+		`INSERT INTO profiles (id, name, avatar_seed, chips, hands_played, hands_won, updated_at)
+		 VALUES (?, ?, ?, ?, 0, 0, ?)
+		 ON CONFLICT(id) DO NOTHING`,
+		id,
+		name,
+		avatarSeed,
+		chips,
+		now.Unix(),
+	)
+	if err != nil {
+		return ProfileRecord{}, err
+	}
+	return s.LoadProfile(id)
+}
+
+func (s *Storage) LoadProfile(id string) (ProfileRecord, error) {
+	var record ProfileRecord
+	var updatedAt int64
+	err := s.db.QueryRow(
+		`SELECT id, name, avatar_seed, chips, hands_played, hands_won, updated_at FROM profiles WHERE id = ?`,
+		id,
+	).Scan(
+		&record.ID,
+		&record.Name,
+		&record.AvatarSeed,
+		&record.Chips,
+		&record.HandsPlayed,
+		&record.HandsWon,
+		&updatedAt,
+	)
+	if err != nil {
+		return ProfileRecord{}, err
+	}
+	record.UpdatedAt = time.Unix(updatedAt, 0)
+	return record, nil
+}
+
+func (s *Storage) UpdateProfileName(id string, name string) (ProfileRecord, error) {
+	_, err := s.db.Exec(
+		`UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?`,
+		name,
+		time.Now().Unix(),
+		id,
+	)
+	if err != nil {
+		return ProfileRecord{}, err
+	}
+	return s.LoadProfile(id)
+}
+
+func (s *Storage) AdjustProfileChips(id string, delta int) (ProfileRecord, error) {
+	_, err := s.db.Exec(
+		`UPDATE profiles SET chips = chips + ?, updated_at = ? WHERE id = ?`,
+		delta,
+		time.Now().Unix(),
+		id,
+	)
+	if err != nil {
+		return ProfileRecord{}, err
+	}
+	return s.LoadProfile(id)
 }
 
 func (s *Storage) DeletePlayer(playerID string) error {
@@ -195,7 +326,7 @@ func (s *Storage) LoadRooms() ([]RoomRecord, error) {
 
 func (s *Storage) LoadPlayers(roomCode string) ([]PlayerRecord, error) {
 	rows, err := s.db.Query(
-		`SELECT id, room_code, name, seat, chips, connected, sitting_out, pending_removal, disconnected_at
+		`SELECT id, profile_id, room_code, name, avatar_seed, seat, chips, connected, sitting_out, pending_removal, disconnected_at
 		 FROM players WHERE room_code = ?`,
 		roomCode,
 	)
@@ -213,8 +344,10 @@ func (s *Storage) LoadPlayers(roomCode string) ([]PlayerRecord, error) {
 		var disconnectedAt sql.NullInt64
 		if err := rows.Scan(
 			&record.ID,
+			&record.ProfileID,
 			&record.RoomCode,
 			&record.Name,
+			&record.AvatarSeed,
 			&record.Seat,
 			&record.Chips,
 			&connected,

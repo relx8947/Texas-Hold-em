@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	startingChips    = 2000
-	chatHistoryLimit = 100
+	startingChips       = 2000
+	initialProfileChips = 100000
+	chatHistoryLimit    = 100
 )
 
 var (
@@ -64,7 +65,9 @@ type Room struct {
 
 type Player struct {
 	ID              string
+	ProfileID       string
 	Name            string
+	AvatarSeed      string
 	Seat            int
 	Conn            *websocket.Conn
 	sendMu          sync.Mutex
@@ -78,6 +81,7 @@ type Player struct {
 	Connected       bool
 	SittingOut      bool
 	PendingRemoval  bool
+	BankrollSettled bool
 	DisconnectedAt  *time.Time
 	disconnectTimer *time.Timer
 }
@@ -89,6 +93,8 @@ type WSMessage struct {
 
 type CreateRoomPayload struct {
 	PlayerName string `json:"playerName"`
+	PlayerID   string `json:"playerId"`
+	ProfileID  string `json:"profileId"`
 	MaxPlayers int    `json:"maxPlayers"`
 	BuyIn      int    `json:"buyIn"`
 }
@@ -97,6 +103,7 @@ type JoinRoomPayload struct {
 	PlayerName string `json:"playerName"`
 	RoomCode   string `json:"roomCode"`
 	PlayerID   string `json:"playerId"`
+	ProfileID  string `json:"profileId"`
 	BuyIn      int    `json:"buyIn"`
 }
 
@@ -110,6 +117,11 @@ type TopUpPayload struct {
 
 type ChatPayload struct {
 	Message string `json:"message"`
+}
+
+type ProfilePayload struct {
+	PlayerID string `json:"playerId"`
+	Name     string `json:"name"`
 }
 
 type RoomSummary struct {
@@ -137,6 +149,7 @@ type PlayerAction struct {
 type PublicPlayer struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
+	AvatarSeed string `json:"avatarSeed"`
 	Seat       int    `json:"seat"`
 	Chips      int    `json:"chips"`
 	BetRound   int    `json:"betRound"`
@@ -152,6 +165,7 @@ type PublicPlayer struct {
 type PrivatePlayer struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
+	AvatarSeed string   `json:"avatarSeed"`
 	Seat       int      `json:"seat"`
 	Chips      int      `json:"chips"`
 	Hole       []string `json:"hole"`
@@ -221,6 +235,15 @@ type ShowdownWinner struct {
 	ChipsWon int    `json:"chipsWon"`
 }
 
+type ProfileResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	AvatarSeed  string `json:"avatarSeed"`
+	Chips       int    `json:"chips"`
+	HandsPlayed int    `json:"handsPlayed"`
+	HandsWon    int    `json:"handsWon"`
+}
+
 type gameSnapshot struct {
 	Stage        string
 	Pot          int
@@ -242,7 +265,9 @@ type RoomSnapshot struct {
 
 type PlayerSnapshot struct {
 	ID             string
+	ProfileID      string
 	Name           string
+	AvatarSeed     string
 	Seat           int
 	Chips          int
 	Connected      bool
@@ -303,7 +328,9 @@ func (s *Server) LoadFromStorage() error {
 			}
 			player := &Player{
 				ID:             p.ID,
+				ProfileID:      firstNonEmpty(p.ProfileID, p.ID),
 				Name:           p.Name,
+				AvatarSeed:     firstNonEmpty(p.AvatarSeed, p.ID),
 				Seat:           seat,
 				Chips:          p.Chips,
 				Connected:      false,
@@ -363,6 +390,37 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		switch msg.Type {
+		case "get_profile":
+			var payload ProfilePayload
+			if len(msg.Payload) > 0 {
+				_ = json.Unmarshal(msg.Payload, &payload)
+			}
+			profile, err := s.ensureProfile(payload.PlayerID, payload.Name)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
+		case "update_profile":
+			var payload ProfilePayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				writeError(conn, "参数错误")
+				continue
+			}
+			profile, err := s.updateProfile(payload.PlayerID, payload.Name)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			if player != nil {
+				room.mu.Lock()
+				player.Name = profile.Name
+				player.ProfileID = profile.ID
+				player.AvatarSeed = profile.AvatarSeed
+				room.mu.Unlock()
+				room.broadcastState()
+			}
+			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
 		case "list_rooms":
 			s.sendRoomsList(conn)
 		case "create_room":
@@ -501,6 +559,21 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "补码金额无效")
 				continue
 			}
+			profile, err := s.ensureProfile(player.ProfileID, player.Name)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			if profile.Chips < payload.Amount {
+				writeError(conn, fmt.Sprintf("总筹码不足，当前剩余%d", profile.Chips))
+				continue
+			}
+			updatedProfile, err := s.adjustProfileChips(player.ProfileID, -payload.Amount)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(updatedProfile)})
 			room.mu.Lock()
 			player.Chips += payload.Amount
 			room.LastEvent = &LastEvent{Kind: "top_up", PlayerID: player.ID, Amount: payload.Amount, Seat: player.Seat}
@@ -552,6 +625,19 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 	if strings.TrimSpace(payload.PlayerName) == "" {
 		return nil, nil, errors.New("请输入昵称")
 	}
+	profile, err := s.ensureProfile(firstNonEmpty(payload.ProfileID, payload.PlayerID), payload.PlayerName)
+	if err != nil {
+		return nil, nil, err
+	}
+	buyIn := sanitizeBuyIn(payload.BuyIn)
+	if profile.Chips < buyIn {
+		return nil, nil, fmt.Errorf("总筹码不足，当前剩余%d", profile.Chips)
+	}
+	updatedProfile, err := s.adjustProfileChips(profile.ID, -buyIn)
+	if err != nil {
+		return nil, nil, err
+	}
+	profile = updatedProfile
 	maxPlayers := sanitizeMaxPlayers(payload.MaxPlayers)
 	code := randomCode()
 	room := &Room{
@@ -562,7 +648,7 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 		CreatedAt:  time.Now(),
 	}
 	room.Game = NewGame(room)
-	player := room.addPlayerLocked(payload.PlayerName, conn, sanitizeBuyIn(payload.BuyIn))
+	player := room.addPlayerLocked(randomID(), profile.ID, profile.Name, profile.AvatarSeed, conn, buyIn)
 	room.HostID = player.ID
 	s.mu.Lock()
 	for s.rooms[code] != nil {
@@ -575,6 +661,7 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 		Type:    "room_created",
 		Payload: mustJSON(map[string]string{"roomCode": code, "playerId": player.ID}),
 	})
+	writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
 	return room, player, nil
 }
 
@@ -592,11 +679,17 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 	if strings.TrimSpace(payload.PlayerName) == "" {
 		return nil, nil, errors.New("请输入昵称")
 	}
+	profile, err := s.ensureProfile(firstNonEmpty(payload.ProfileID, payload.PlayerID), payload.PlayerName)
+	if err != nil {
+		return nil, nil, err
+	}
+	buyIn := sanitizeBuyIn(payload.BuyIn)
 	room.mu.Lock()
 	defer room.mu.Unlock()
 
-	if payload.PlayerID != "" {
-		if _, p := room.findPlayerByIDLocked(payload.PlayerID); p != nil {
+	roomPlayerID := strings.TrimSpace(payload.PlayerID)
+	if roomPlayerID != "" {
+		if _, p := room.findPlayerByIDLocked(roomPlayerID); p != nil {
 			if p.PendingRemoval {
 				return nil, nil, errors.New("该玩家已退出房间")
 			}
@@ -608,9 +701,41 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 			}
 			p.Conn = conn
 			p.Connected = true
-			if payload.PlayerName != "" {
-				p.Name = payload.PlayerName
+			p.ProfileID = profile.ID
+			p.Name = profile.Name
+			p.AvatarSeed = profile.AvatarSeed
+			if p.disconnectTimer != nil {
+				p.disconnectTimer.Stop()
+				p.disconnectTimer = nil
 			}
+			p.DisconnectedAt = nil
+			if room.Server != nil && room.Server.storage != nil {
+				_ = room.Server.storage.UpsertPlayer(room.Code, buildPlayerSnapshot(p))
+			}
+			writeJSON(conn, WSMessage{
+				Type:    "room_joined",
+				Payload: mustJSON(map[string]string{"roomCode": room.Code, "playerId": p.ID}),
+			})
+			return room, p, nil
+		}
+	}
+
+	if profile.ID != "" {
+		if _, p := room.findPlayerByProfileIDLocked(profile.ID); p != nil {
+			if p.PendingRemoval {
+				return nil, nil, errors.New("该玩家已退出房间")
+			}
+			if p.Connected {
+				return nil, nil, errors.New("该玩家已在线")
+			}
+			if p.DisconnectedAt != nil && time.Since(*p.DisconnectedAt) > disconnectTimeout {
+				return nil, nil, errors.New("断线已超时，请重新加入")
+			}
+			p.Conn = conn
+			p.Connected = true
+			p.ProfileID = profile.ID
+			p.Name = profile.Name
+			p.AvatarSeed = profile.AvatarSeed
 			if p.disconnectTimer != nil {
 				p.disconnectTimer.Stop()
 				p.disconnectTimer = nil
@@ -630,11 +755,20 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 	if room.isFullLocked() {
 		return nil, nil, errors.New("房间已满")
 	}
-	player := room.addPlayerLocked(payload.PlayerName, conn, sanitizeBuyIn(payload.BuyIn))
+	if profile.Chips < buyIn {
+		return nil, nil, fmt.Errorf("总筹码不足，当前剩余%d", profile.Chips)
+	}
+	updatedProfile, err := s.adjustProfileChips(profile.ID, -buyIn)
+	if err != nil {
+		return nil, nil, err
+	}
+	profile = updatedProfile
+	player := room.addPlayerLocked(randomID(), profile.ID, profile.Name, profile.AvatarSeed, conn, buyIn)
 	writeJSON(conn, WSMessage{
 		Type:    "room_joined",
 		Payload: mustJSON(map[string]string{"roomCode": room.Code, "playerId": player.ID}),
 	})
+	writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
 	return room, player, nil
 }
 
@@ -688,9 +822,89 @@ func (s *Server) listRooms() []RoomSummary {
 	return summaries
 }
 
+func (s *Server) ensureProfile(playerID string, playerName string) (ProfileResponse, error) {
+	name := strings.TrimSpace(playerName)
+	if name == "" {
+		name = "玩家"
+	}
+	id := strings.TrimSpace(playerID)
+	if id == "" {
+		id = randomID()
+	}
+	seed := stableAvatarSeed(id)
+	if s.storage == nil {
+		return ProfileResponse{ID: id, Name: name, AvatarSeed: seed, Chips: initialProfileChips}, nil
+	}
+	record, err := s.storage.EnsureProfile(id, name, seed, initialProfileChips)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	return profileResponse(record), nil
+}
+
+func (s *Server) updateProfile(playerID string, playerName string) (ProfileResponse, error) {
+	id := strings.TrimSpace(playerID)
+	if id == "" {
+		return ProfileResponse{}, errors.New("玩家ID不能为空")
+	}
+	name := strings.TrimSpace(playerName)
+	if name == "" {
+		return ProfileResponse{}, errors.New("请输入昵称")
+	}
+	if len([]rune(name)) > 16 {
+		return ProfileResponse{}, errors.New("昵称最多16个字符")
+	}
+	if s.storage == nil {
+		return ProfileResponse{ID: id, Name: name, AvatarSeed: stableAvatarSeed(id), Chips: initialProfileChips}, nil
+	}
+	if _, err := s.storage.EnsureProfile(id, name, stableAvatarSeed(id), initialProfileChips); err != nil {
+		return ProfileResponse{}, err
+	}
+	record, err := s.storage.UpdateProfileName(id, name)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	return profileResponse(record), nil
+}
+
+func (s *Server) adjustProfileChips(profileID string, delta int) (ProfileResponse, error) {
+	if profileID == "" {
+		return ProfileResponse{}, nil
+	}
+	if s.storage == nil {
+		return ProfileResponse{ID: profileID, AvatarSeed: stableAvatarSeed(profileID), Chips: initialProfileChips + delta}, nil
+	}
+	if delta == 0 {
+		record, err := s.storage.LoadProfile(profileID)
+		if err != nil {
+			return ProfileResponse{}, err
+		}
+		return profileResponse(record), nil
+	}
+	record, err := s.storage.AdjustProfileChips(profileID, delta)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	return profileResponse(record), nil
+}
+
+func profileResponse(record ProfileRecord) ProfileResponse {
+	return ProfileResponse{
+		ID:          record.ID,
+		Name:        record.Name,
+		AvatarSeed:  firstNonEmpty(record.AvatarSeed, stableAvatarSeed(record.ID)),
+		Chips:       record.Chips,
+		HandsPlayed: record.HandsPlayed,
+		HandsWon:    record.HandsWon,
+	}
+}
+
 func (s *Server) dissolveRoom(room *Room, reason string) {
 	room.mu.Lock()
 	players := append([]*Player{}, room.Seats...)
+	for _, p := range room.Seats {
+		room.settlePlayerBankrollLocked(p)
+	}
 	if room.ActionTimer != nil {
 		room.ActionTimer.Stop()
 		room.ActionTimer = nil
@@ -714,15 +928,17 @@ func (s *Server) dissolveRoom(room *Room, reason string) {
 	}
 }
 
-func (r *Room) addPlayerLocked(name string, conn *websocket.Conn, buyIn int) *Player {
+func (r *Room) addPlayerLocked(id string, profileID string, name string, avatarSeed string, conn *websocket.Conn, buyIn int) *Player {
 	seat := r.firstEmptySeatLocked()
 	player := &Player{
-		ID:        randomID(),
-		Name:      name,
-		Seat:      seat,
-		Conn:      conn,
-		Chips:     buyIn,
-		Connected: true,
+		ID:         id,
+		ProfileID:  profileID,
+		Name:       name,
+		AvatarSeed: avatarSeed,
+		Seat:       seat,
+		Conn:       conn,
+		Chips:      buyIn,
+		Connected:  true,
 	}
 	r.Seats[seat] = player
 	return player
@@ -744,6 +960,15 @@ func (r *Room) isFullLocked() bool {
 func (r *Room) findPlayerByIDLocked(id string) (int, *Player) {
 	for i, p := range r.Seats {
 		if p != nil && p.ID == id {
+			return i, p
+		}
+	}
+	return -1, nil
+}
+
+func (r *Room) findPlayerByProfileIDLocked(profileID string) (int, *Player) {
+	for i, p := range r.Seats {
+		if p != nil && p.ProfileID == profileID {
 			return i, p
 		}
 	}
@@ -831,6 +1056,7 @@ func (r *Room) removePlayerLocked(playerID string) bool {
 		return false
 	}
 
+	r.settlePlayerBankrollLocked(player)
 	r.Seats[idx] = nil
 	r.ensureHostLocked()
 	if r.Server != nil && r.Server.storage != nil {
@@ -845,6 +1071,7 @@ func (r *Room) cleanupPendingRemovalsLocked() {
 			continue
 		}
 		if p.PendingRemoval {
+			r.settlePlayerBankrollLocked(p)
 			r.Seats[i] = nil
 			if r.Server != nil && r.Server.storage != nil {
 				_ = r.Server.storage.DeletePlayer(p.ID)
@@ -852,6 +1079,17 @@ func (r *Room) cleanupPendingRemovalsLocked() {
 		}
 	}
 	r.ensureHostLocked()
+}
+
+func (r *Room) settlePlayerBankrollLocked(player *Player) {
+	if player == nil || player.BankrollSettled {
+		return
+	}
+	if player.Chips > 0 && r.Server != nil {
+		_, _ = r.Server.adjustProfileChips(player.ProfileID, player.Chips)
+	}
+	player.Chips = 0
+	player.BankrollSettled = true
 }
 
 func (r *Room) ensureHostLocked() {
@@ -1057,6 +1295,9 @@ func (r *Room) broadcastState() {
 		if p == nil {
 			continue
 		}
+		if p.BankrollSettled {
+			continue
+		}
 		state := r.buildStateForSnapshot(p, snapshot, players, actionDeadline, serverTime, stateSeq, handID, lastEvent)
 		states = append(states, state)
 		playerSnapshots = append(playerSnapshots, buildPlayerSnapshot(p))
@@ -1066,6 +1307,9 @@ func (r *Room) broadcastState() {
 	idx := 0
 	for _, p := range players {
 		if p == nil {
+			continue
+		}
+		if p.BankrollSettled {
 			continue
 		}
 		_ = p.send(states[idx])
@@ -1084,6 +1328,7 @@ func (r *Room) buildStateForSnapshot(player *Player, game gameSnapshot, seatPlay
 		public := PublicPlayer{
 			ID:         p.ID,
 			Name:       p.Name,
+			AvatarSeed: p.AvatarSeed,
 			Seat:       idx,
 			Chips:      p.Chips,
 			BetRound:   p.BetRound,
@@ -1123,6 +1368,7 @@ func (r *Room) buildStateForSnapshot(player *Player, game gameSnapshot, seatPlay
 		You: PrivatePlayer{
 			ID:         player.ID,
 			Name:       player.Name,
+			AvatarSeed: player.AvatarSeed,
 			Seat:       player.Seat,
 			Chips:      player.Chips,
 			Hole:       cardsToString(player.Hole),
@@ -1192,7 +1438,9 @@ func buildPlayerSnapshot(player *Player) PlayerSnapshot {
 	}
 	return PlayerSnapshot{
 		ID:             player.ID,
+		ProfileID:      player.ProfileID,
 		Name:           player.Name,
+		AvatarSeed:     player.AvatarSeed,
 		Seat:           player.Seat,
 		Chips:          player.Chips,
 		Connected:      player.Connected,
@@ -1239,6 +1487,22 @@ func randomID() string {
 	idRandMu.Lock()
 	defer idRandMu.Unlock()
 	return fmt.Sprintf("%08x", idRand.Int31())
+}
+
+func stableAvatarSeed(id string) string {
+	if strings.TrimSpace(id) == "" {
+		return randomID()
+	}
+	return fmt.Sprintf("gh-%s", id)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func sanitizeMaxPlayers(n int) int {

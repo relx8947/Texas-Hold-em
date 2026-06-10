@@ -5,6 +5,8 @@ export type WSMessage<T = unknown> = {
 
 export type CreateRoomPayload = {
   playerName: string
+  playerId: string
+  profileId: string
   maxPlayers: number
   buyIn: number
 }
@@ -13,6 +15,7 @@ export type JoinRoomPayload = {
   playerName: string
   roomCode: string
   playerId: string
+  profileId: string
   buyIn: number
 }
 
@@ -42,6 +45,7 @@ export type RoomSummary = {
 export type PublicPlayer = {
   id: string
   name: string
+  avatarSeed: string
   seat: number
   chips: number
   betRound: number
@@ -57,6 +61,7 @@ export type PublicPlayer = {
 export type PrivatePlayer = {
   id: string
   name: string
+  avatarSeed: string
   seat: number
   chips: number
   hole: string[]
@@ -125,4 +130,13 @@ export type ShowdownPayload = {
   community: string[]
   players: ShowdownPlayer[]
   results: ShowdownResult[]
+}
+
+export type PlayerProfile = {
+  id: string
+  name: string
+  avatarSeed: string
+  chips: number
+  handsPlayed: number
+  handsWon: number
 }

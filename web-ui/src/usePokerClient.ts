@@ -5,6 +5,7 @@ import type {
   CreateRoomPayload,
   JoinRoomPayload,
   PlayerActionPayload,
+  PlayerProfile,
   RoomSummary,
   ShowdownPayload,
   StatePayload,
@@ -18,6 +19,8 @@ function storageKey(roomCode: string) {
   return `playerId:${roomCode.toUpperCase()}`
 }
 
+const profileStorageKey = 'playerProfileId'
+
 export function getStoredPlayerId(roomCode: string) {
   return localStorage.getItem(storageKey(roomCode)) ?? ''
 }
@@ -25,6 +28,16 @@ export function getStoredPlayerId(roomCode: string) {
 export function storePlayerId(roomCode: string, playerId: string) {
   if (!roomCode || !playerId) return
   localStorage.setItem(storageKey(roomCode), playerId)
+}
+
+export function getStoredProfileId() {
+  return localStorage.getItem(profileStorageKey) ?? ''
+}
+
+function storeProfile(profile: PlayerProfile) {
+  if (!profile.id) return
+  localStorage.setItem(profileStorageKey, profile.id)
+  localStorage.setItem('playerName', profile.name)
 }
 
 export function usePokerClient() {
@@ -41,6 +54,7 @@ export function usePokerClient() {
   const [chat, setChat] = useState<ChatMessage[]>([])
   const [logs, setLogs] = useState<string[]>([])
   const [showdown, setShowdown] = useState<ShowdownPayload | null>(null)
+  const [profile, setProfile] = useState<PlayerProfile | null>(null)
 
   const log = useCallback((message: string) => {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev])
@@ -117,6 +131,12 @@ export function usePokerClient() {
           log(`加入房间：${payload.roomCode}`)
           return
         }
+        case 'profile': {
+          const payload = msg.payload as PlayerProfile
+          setProfile(payload)
+          storeProfile(payload)
+          return
+        }
         case 'state': {
           const payload = msg.payload as StatePayload
           setState(payload)
@@ -178,6 +198,8 @@ export function usePokerClient() {
   const api = useMemo(() => {
     return {
       send,
+      getProfile: (payload: { playerId: string; name: string }) => send('get_profile', payload),
+      updateProfile: (payload: { playerId: string; name: string }) => send('update_profile', payload),
       listRooms: () => send('list_rooms', {}),
       createRoom: (payload: CreateRoomPayload) => send('create_room', payload),
       joinRoom: (payload: JoinRoomPayload) => send('join_room', payload),
@@ -202,8 +224,8 @@ export function usePokerClient() {
     chat,
     logs,
     showdown,
+    profile,
     connect,
     api,
   }
 }
-

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { RoomSummary } from '../protocol'
-import { getStoredPlayerId } from '../usePokerClient'
+import { getStoredPlayerId, getStoredProfileId } from '../usePokerClient'
 
 type Props = {
   serverUrl: string
@@ -8,11 +8,12 @@ type Props = {
   connectionState: string
   rooms: RoomSummary[]
   onRefreshRooms: () => void
-  onCreateRoom: (payload: { playerName: string; maxPlayers: number; buyIn: number }) => void
+  onCreateRoom: (payload: { playerName: string; playerId: string; profileId: string; maxPlayers: number; buyIn: number }) => void
   onJoinRoom: (payload: {
     playerName: string
     roomCode: string
     playerId: string
+    profileId: string
     buyIn: number
   }) => void
 }
@@ -91,6 +92,8 @@ export function Lobby({
             onClick={() =>
               onCreateRoom({
                 playerName: playerName.trim(),
+                playerId: '',
+                profileId: getStoredProfileId(),
                 maxPlayers,
                 buyIn: buyInValue,
               })
@@ -106,6 +109,7 @@ export function Lobby({
                 playerName: playerName.trim(),
                 roomCode: code,
                 playerId: getStoredPlayerId(code),
+                profileId: getStoredProfileId(),
                 buyIn: buyInValue,
               })
             }}
@@ -139,6 +143,7 @@ export function Lobby({
                     playerName: playerName.trim(),
                     roomCode: code,
                     playerId: getStoredPlayerId(code),
+                    profileId: getStoredProfileId(),
                     buyIn: buyInValue,
                   })
                 }}
@@ -157,4 +162,3 @@ export function Lobby({
     </div>
   )
 }
-
