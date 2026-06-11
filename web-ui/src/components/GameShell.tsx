@@ -133,28 +133,45 @@ export function GameShell() {
   if (!isAuthed) {
     return (
       <div className="gameShell loginShell">
-        <main className="loginPanel">
-          <div className="loginKicker">Texas Hold&apos;em LAN</div>
-          <h1>登录</h1>
-          <p>输入用户名后进入游戏。</p>
-          <label className="field">
-            <div className="label">用户名</div>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="首次使用会自动创建用户"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitAuth()
-              }}
-            />
-          </label>
-          <button
-            className="btn primary wide"
-            disabled={!canAuth || authState === 'authenticating'}
-            onClick={submitAuth}
-          >
-            {authState === 'authenticating' ? '登录中...' : '进入'}
-          </button>
+        <main className="loginScene">
+          <section className="loginBrand" aria-label="欢乐德州">
+            <div className="loginMark">TH</div>
+            <div>
+              <div className="loginKicker">Texas Hold&apos;em LAN</div>
+              <h1>欢乐德州</h1>
+              <div className="loginSub">好友局实时牌桌</div>
+            </div>
+            <div className="loginCards" aria-hidden="true">
+              <div className="loginCard red">A<span>♥</span></div>
+              <div className="loginCard black">K<span>♠</span></div>
+            </div>
+          </section>
+
+          <section className="loginPanel" aria-label="登录">
+            <div className="loginPanelHeader">
+              <div className="loginPanelTitle">登录</div>
+              <div className="loginChip">100K</div>
+            </div>
+            <label className="field loginField">
+              <div className="label">用户名</div>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="输入或创建用户名"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitAuth()
+                }}
+              />
+            </label>
+            <button
+              className="btn primary wide loginButton"
+              disabled={!canAuth || authState === 'authenticating'}
+              onClick={submitAuth}
+            >
+              {authState === 'authenticating' ? '登录中...' : '进入牌桌'}
+            </button>
+          </section>
         </main>
       </div>
     )

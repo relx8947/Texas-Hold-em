@@ -28,48 +28,184 @@
 .loginShell {
   place-items: center;
   grid-template-rows: minmax(0, 1fr);
-  padding: 24px;
+  padding: 32px;
+  background:
+    linear-gradient(135deg, rgba(13, 37, 33, 0.92), rgba(6, 18, 18, 0.82)),
+    radial-gradient(900px 460px at 24% 28%, rgba(231, 193, 93, 0.22), transparent 62%),
+    linear-gradient(180deg, #153833 0%, #0b1d1c 100%);
 }
 
-.loginPanel {
+.loginScene {
   position: relative;
   z-index: 1;
-  width: min(440px, calc(100vw - 32px));
+  width: min(920px, calc(100vw - 36px));
+  min-height: 420px;
   display: grid;
-  gap: 14px;
-  padding: 28px;
-  border-radius: 30px;
-  border: 1px solid rgba(244, 206, 100, 0.42);
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 380px);
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(244, 206, 100, 0.32);
+  border-radius: 12px;
   background:
-    linear-gradient(180deg, rgba(255, 250, 240, 0.98), rgba(255, 239, 210, 0.96));
-  color: #6b3a16;
-  box-shadow: 0 28px 80px rgba(3, 11, 11, 0.38);
+    linear-gradient(90deg, rgba(10, 34, 31, 0.96), rgba(14, 56, 47, 0.88)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.38);
 }
 
-.loginPanel h1 {
-  margin: 0;
-  color: var(--hl-red-deep);
-  font-size: 34px;
-  line-height: 1.05;
+.loginScene::before {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  pointer-events: none;
+  border: 1px solid rgba(244, 206, 100, 0.18);
 }
 
-.loginPanel p {
-  margin: 0 0 4px;
-  color: #8a4b16;
-  font-weight: 700;
+.loginBrand {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  padding: 56px;
+  color: #fff7df;
+}
+
+.loginMark {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(244, 206, 100, 0.66);
+  background: rgba(244, 206, 100, 0.14);
+  color: #f4ce64;
+  font-weight: 900;
+  font-size: 18px;
+}
+
+.loginBrand h1 {
+  margin: 4px 0 0;
+  color: #ffffff;
+  font-size: 72px;
+  line-height: 0.95;
+  letter-spacing: 0;
+  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 .loginKicker {
-  color: var(--hl-gold-deep);
+  color: #f4ce64;
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
-.loginLogs {
+.loginSub {
+  margin-top: 10px;
+  color: rgba(255, 247, 223, 0.74);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.loginCards {
+  position: absolute;
+  right: 38px;
+  bottom: 34px;
+  width: 160px;
+  height: 128px;
+}
+
+.loginCard {
+  position: absolute;
+  width: 82px;
+  height: 112px;
   display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 12px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: #fffdf6;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.28);
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.loginCard span {
+  font-size: 24px;
+}
+
+.loginCard.red {
+  left: 22px;
+  top: 6px;
+  color: #c42c24;
+  transform: rotate(-10deg);
+}
+
+.loginCard.black {
+  right: 18px;
+  top: 16px;
+  color: #1f2d2c;
+  transform: rotate(11deg);
+}
+
+.loginPanel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 18px;
+  padding: 48px;
+  color: #17312c;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 243, 0.98), rgba(245, 233, 206, 0.98));
+}
+
+.loginPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.loginPanelTitle {
+  color: #17312c;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.loginChip {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff1a6, #d99a26 68%);
+  border: 4px dashed rgba(122, 61, 9, 0.45);
+  color: #7a3d09;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 8px 18px rgba(122, 61, 9, 0.22);
+}
+
+.loginField {
   gap: 8px;
+}
+
+.loginField input {
+  min-height: 48px;
+  border-radius: 8px;
+  border-color: rgba(23, 49, 44, 0.18);
+  background: #fffdf8;
+  font-size: 16px;
+}
+
+.loginButton {
+  min-height: 48px;
+  border-radius: 8px;
+  font-size: 15px;
 }
 
 .gameHud {
@@ -657,6 +793,41 @@
     height: auto;
     min-height: 100vh;
     overflow: auto;
+  }
+
+  .loginShell {
+    min-height: 100vh;
+    padding: 16px;
+  }
+
+  .loginScene {
+    width: min(430px, calc(100vw - 24px));
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .loginScene::before {
+    inset: 12px;
+  }
+
+  .loginBrand {
+    min-height: 260px;
+    padding: 34px 28px 92px;
+  }
+
+  .loginBrand h1 {
+    font-size: 52px;
+  }
+
+  .loginCards {
+    right: 18px;
+    bottom: 16px;
+    transform: scale(0.82);
+    transform-origin: right bottom;
+  }
+
+  .loginPanel {
+    padding: 28px;
   }
 
   .gameHud {
