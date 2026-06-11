@@ -22,9 +22,14 @@ export type JoinRoomPayload = {
 }
 
 export type LoginPayload = {
-  playerId: string
+  username: string
+  password: string
+}
+
+export type RegisterPayload = {
+  username: string
+  password: string
   playerName: string
-  accessCode: string
 }
 
 export type PlayerActionPayload = {

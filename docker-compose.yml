@@ -7,7 +7,6 @@ services:
       ADDR: ":8080"
       DATA_PATH: "/data/data.db"
       STATIC_DIR: "/app/web"
-      ACCESS_CODE: "${ACCESS_CODE:-}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
     volumes:
       - texas_holdem_data:/data

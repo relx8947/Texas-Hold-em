@@ -8,6 +8,7 @@ import './GameShell.css'
 
 type OverlayMode = 'create' | 'join'
 type PanelMode = 'room' | 'logs'
+type AuthMode = 'login' | 'register'
 
 function formatCards(cards: string[]) {
   return cards.map((card) => card.replace('T', '10')).join(' ')
@@ -61,10 +62,12 @@ export function GameShell() {
   const [overlayOpen, setOverlayOpen] = useState(true)
   const [mode, setMode] = useState<OverlayMode>('create')
   const [panelMode, setPanelMode] = useState<PanelMode>('room')
+  const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [profileOpen, setProfileOpen] = useState(false)
+  const [username, setUsername] = useState(() => localStorage.getItem('username') ?? '')
+  const [password, setPassword] = useState('')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
-  const [accessCode, setAccessCode] = useState(() => localStorage.getItem('accessCode') ?? '')
   const [roomCode, setRoomCode] = useState('')
   const [roomPassword, setRoomPassword] = useState('')
   const [maxPlayers, setMaxPlayers] = useState(6)
@@ -120,14 +123,22 @@ export function GameShell() {
   const canSubmit = playerName.trim().length > 0
   const isAuthed = authState === 'authenticated'
   const profileId = profile?.id ?? getStoredProfileId()
+  const canAuth = username.trim().length > 0 && password.length > 0 && (authMode === 'login' || playerName.trim().length > 0)
 
-  const submitLogin = () => {
-    if (!canSubmit) return
-    localStorage.setItem('accessCode', accessCode)
-    api.login({
-      playerId: getStoredProfileId(),
+  const submitAuth = () => {
+    if (!canAuth) return
+    localStorage.setItem('username', username.trim())
+    if (authMode === 'login') {
+      api.login({
+        username: username.trim(),
+        password,
+      })
+      return
+    }
+    api.register({
+      username: username.trim(),
+      password,
       playerName: playerName.trim(),
-      accessCode,
     })
   }
 
@@ -136,8 +147,16 @@ export function GameShell() {
       <div className="gameShell loginShell">
         <main className="loginPanel">
           <div className="loginKicker">Texas Hold&apos;em LAN</div>
-          <h1>进入好友牌局</h1>
-          <p>先完成轻量登录，服务端会用访问口令保护本次 WebSocket 会话。</p>
+          <h1>{authMode === 'login' ? '登录账号' : '注册玩家'}</h1>
+          <p>只有注册后的用户登录成功，才能进入房间大厅和牌桌界面。</p>
+          <div className="overlayTabs authTabs">
+            <button className={`tab ${authMode === 'login' ? 'active' : ''}`} onClick={() => setAuthMode('login')}>
+              登录
+            </button>
+            <button className={`tab ${authMode === 'register' ? 'active' : ''}`} onClick={() => setAuthMode('register')}>
+              注册
+            </button>
+          </div>
           <label className="field">
             <div className="label">服务器地址</div>
             <input
@@ -147,27 +166,33 @@ export function GameShell() {
             />
           </label>
           <label className="field">
-            <div className="label">昵称</div>
-            <input value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="请输入昵称" />
+            <div className="label">用户名</div>
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="请输入用户名" />
           </label>
           <label className="field">
-            <div className="label">访问口令</div>
+            <div className="label">密码</div>
             <input
-              value={accessCode}
+              value={password}
               type="password"
-              onChange={(e) => setAccessCode(e.target.value)}
-              placeholder="未配置 ACCESS_CODE 时可留空"
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={authMode === 'register' ? '至少 6 个字符' : '请输入密码'}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') submitLogin()
+                if (e.key === 'Enter') submitAuth()
               }}
             />
           </label>
+          {authMode === 'register' ? (
+            <label className="field">
+              <div className="label">游戏昵称</div>
+              <input value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="牌桌展示昵称" />
+            </label>
+          ) : null}
           <button
             className="btn primary wide"
-            disabled={!canSubmit || authState === 'authenticating'}
-            onClick={submitLogin}
+            disabled={!canAuth || authState === 'authenticating'}
+            onClick={submitAuth}
           >
-            {authState === 'authenticating' ? '登录中...' : '登录并连接'}
+            {authState === 'authenticating' ? '处理中...' : authMode === 'login' ? '登录' : '注册并登录'}
           </button>
           <div className={`hudStatus ${connectionState}`}>{connectionState}</div>
           <div className="loginLogs">

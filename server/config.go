@@ -11,7 +11,6 @@ type AppConfig struct {
 	Addr           string
 	DataPath       string
 	StaticDir      string
-	AccessCode     string
 	AllowedOrigins []string
 	WSReadLimit    int64
 	WSWriteTimeout time.Duration
@@ -30,7 +29,6 @@ func LoadConfig() AppConfig {
 		Addr:           envString("ADDR", ":8080"),
 		DataPath:       envString("DATA_PATH", "data.db"),
 		StaticDir:      envString("STATIC_DIR", "../web-ui/dist"),
-		AccessCode:     strings.TrimSpace(os.Getenv("ACCESS_CODE")),
 		AllowedOrigins: envList("ALLOWED_ORIGINS"),
 		WSReadLimit:    envInt64("WS_READ_LIMIT_BYTES", 4096),
 		WSWriteTimeout: envDurationSeconds("WS_WRITE_TIMEOUT_SECONDS", 10*time.Second),

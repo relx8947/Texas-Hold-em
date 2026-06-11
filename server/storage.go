@@ -43,6 +43,14 @@ type ProfileRecord struct {
 	UpdatedAt   time.Time
 }
 
+type UserRecord struct {
+	Username     string
+	PasswordHash string
+	ProfileID    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 func NewStorage(path string) (*Storage, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -94,6 +102,13 @@ func (s *Storage) initSchema() error {
 			chips INTEGER NOT NULL,
 			hands_played INTEGER NOT NULL,
 			hands_won INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS users (
+			username TEXT PRIMARY KEY,
+			password_hash TEXT NOT NULL,
+			profile_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS chat (
@@ -223,6 +238,51 @@ func (s *Storage) EnsureProfile(id string, name string, avatarSeed string, chips
 		return ProfileRecord{}, err
 	}
 	return s.LoadProfile(id)
+}
+
+func (s *Storage) CreateUser(username string, passwordHash string, profile ProfileRecord) (UserRecord, error) {
+	now := time.Now()
+	_, err := s.db.Exec(
+		`INSERT INTO users (username, password_hash, profile_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		username,
+		passwordHash,
+		profile.ID,
+		now.Unix(),
+		now.Unix(),
+	)
+	if err != nil {
+		return UserRecord{}, err
+	}
+	return UserRecord{
+		Username:     username,
+		PasswordHash: passwordHash,
+		ProfileID:    profile.ID,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}, nil
+}
+
+func (s *Storage) LoadUser(username string) (UserRecord, error) {
+	var record UserRecord
+	var createdAt int64
+	var updatedAt int64
+	err := s.db.QueryRow(
+		`SELECT username, password_hash, profile_id, created_at, updated_at FROM users WHERE username = ?`,
+		username,
+	).Scan(
+		&record.Username,
+		&record.PasswordHash,
+		&record.ProfileID,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return UserRecord{}, err
+	}
+	record.CreatedAt = time.Unix(createdAt, 0)
+	record.UpdatedAt = time.Unix(updatedAt, 0)
+	return record, nil
 }
 
 func (s *Storage) LoadProfile(id string) (ProfileRecord, error) {

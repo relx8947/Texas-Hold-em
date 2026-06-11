@@ -1,8 +1,11 @@
 package main
 
 import (
+	crand "crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,9 +119,14 @@ type JoinRoomPayload struct {
 }
 
 type LoginPayload struct {
-	PlayerID   string `json:"playerId"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type RegisterPayload struct {
+	Username   string `json:"username"`
+	Password   string `json:"password"`
 	PlayerName string `json:"playerName"`
-	AccessCode string `json:"accessCode"`
 }
 
 type KickPayload struct {
@@ -377,6 +385,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	var room *Room
 	var player *Player
 	authenticated := false
+	var sessionProfile ProfileResponse
 	stopPing := s.startConnHeartbeat(conn)
 	defer stopPing()
 
@@ -404,6 +413,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			authenticated = true
+			sessionProfile = profile
+			writeJSON(conn, WSMessage{Type: "login_ok", Payload: mustJSON(profile)})
+			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
+			continue
+		}
+		if msg.Type == "register" {
+			var payload RegisterPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				writeError(conn, "参数错误")
+				continue
+			}
+			profile, err := s.register(payload)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			authenticated = true
+			sessionProfile = profile
 			writeJSON(conn, WSMessage{Type: "login_ok", Payload: mustJSON(profile)})
 			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
 			continue
@@ -419,7 +446,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if len(msg.Payload) > 0 {
 				_ = json.Unmarshal(msg.Payload, &payload)
 			}
-			profile, err := s.ensureProfile(payload.PlayerID, payload.Name)
+			profile, err := s.ensureProfile(sessionProfile.ID, sessionProfile.Name)
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
@@ -431,7 +458,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "参数错误")
 				continue
 			}
-			profile, err := s.updateProfile(payload.PlayerID, payload.Name)
+			profile, err := s.updateProfile(sessionProfile.ID, payload.Name)
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
@@ -444,6 +471,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				room.mu.Unlock()
 				room.broadcastState()
 			}
+			sessionProfile = profile
 			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
 		case "list_rooms":
 			s.sendRoomsList(conn)
@@ -457,6 +485,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "参数错误")
 				continue
 			}
+			payload.PlayerName = sessionProfile.Name
+			payload.ProfileID = sessionProfile.ID
+			payload.PlayerID = sessionProfile.ID
 			room, player, err = s.createRoom(payload, conn)
 			if err != nil {
 				writeError(conn, err.Error())
@@ -474,6 +505,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "参数错误")
 				continue
 			}
+			payload.PlayerName = sessionProfile.Name
+			payload.ProfileID = sessionProfile.ID
 			room, player, err = s.joinRoom(payload, conn)
 			if err != nil {
 				writeError(conn, err.Error())
@@ -799,8 +832,41 @@ func (s *Server) sendRoomsList(conn *websocket.Conn) {
 }
 
 func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
-	if s.config.AccessCode != "" && subtle.ConstantTimeCompare([]byte(payload.AccessCode), []byte(s.config.AccessCode)) != 1 {
-		return ProfileResponse{}, errors.New("访问口令错误")
+	username := normalizeUsername(payload.Username)
+	if username == "" {
+		return ProfileResponse{}, errors.New("请输入用户名")
+	}
+	if strings.TrimSpace(payload.Password) == "" {
+		return ProfileResponse{}, errors.New("请输入密码")
+	}
+	user, err := s.storage.LoadUser(username)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ProfileResponse{}, errors.New("用户不存在")
+		}
+		return ProfileResponse{}, err
+	}
+	if !verifyPassword(user.PasswordHash, payload.Password) {
+		return ProfileResponse{}, errors.New("用户名或密码错误")
+	}
+	profile, err := s.storage.LoadProfile(user.ProfileID)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	return profileResponse(profile), nil
+}
+
+func (s *Server) register(payload RegisterPayload) (ProfileResponse, error) {
+	username := normalizeUsername(payload.Username)
+	if username == "" {
+		return ProfileResponse{}, errors.New("请输入用户名")
+	}
+	if len(username) < 3 || len(username) > 24 {
+		return ProfileResponse{}, errors.New("用户名需为3-24个字符")
+	}
+	password := strings.TrimSpace(payload.Password)
+	if len(password) < 6 {
+		return ProfileResponse{}, errors.New("密码至少6个字符")
 	}
 	name := strings.TrimSpace(payload.PlayerName)
 	if name == "" {
@@ -809,7 +875,25 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 	if len([]rune(name)) > 16 {
 		return ProfileResponse{}, errors.New("昵称最多16个字符")
 	}
-	return s.ensureProfile(payload.PlayerID, name)
+	profileID := randomID()
+	profile, err := s.ensureProfile(profileID, name)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	passwordHash, err := hashPassword(password)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	_, err = s.storage.CreateUser(username, passwordHash, ProfileRecord{
+		ID:         profile.ID,
+		Name:       profile.Name,
+		AvatarSeed: profile.AvatarSeed,
+		Chips:      profile.Chips,
+	})
+	if err != nil {
+		return ProfileResponse{}, errors.New("用户名已被注册")
+	}
+	return profile, nil
 }
 
 func (s *Server) listRooms() []RoomSummary {
@@ -1620,6 +1704,44 @@ func verifySecret(hash string, secret string) bool {
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(candidate)) == 1
 }
 
+func hashPassword(password string) (string, error) {
+	salt := make([]byte, 16)
+	if _, err := crand.Read(salt); err != nil {
+		return "", err
+	}
+	digest := passwordDigest(password, salt)
+	return fmt.Sprintf("v1$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(digest)), nil
+}
+
+func verifyPassword(stored string, password string) bool {
+	parts := strings.Split(stored, "$")
+	if len(parts) != 3 || parts[0] != "v1" {
+		return false
+	}
+	salt, err := hex.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	expected, err := hex.DecodeString(parts[2])
+	if err != nil {
+		return false
+	}
+	actual := passwordDigest(password, salt)
+	return subtle.ConstantTimeCompare(expected, actual) == 1
+}
+
+func passwordDigest(password string, salt []byte) []byte {
+	sum := sha256.Sum256(append(append([]byte{}, salt...), []byte(password)...))
+	digest := sum[:]
+	for i := 0; i < 100_000; i++ {
+		next := sha256.Sum256(append(append([]byte{}, digest...), []byte(password)...))
+		digest = next[:]
+	}
+	out := make([]byte, len(digest))
+	copy(out, digest)
+	return out
+}
+
 func mustJSON(v interface{}) json.RawMessage {
 	data, _ := json.Marshal(v)
 	return data
@@ -1656,6 +1778,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeUsername(username string) string {
+	return strings.ToLower(strings.TrimSpace(username))
 }
 
 func sanitizeMaxPlayers(n int) int {
