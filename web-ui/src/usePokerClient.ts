@@ -60,57 +60,6 @@ export function usePokerClient() {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev])
   }, [])
 
-  const connect = useCallback(async () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      return
-    }
-    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
-      return
-    }
-
-    setConnectionState('connecting')
-    const ws = new WebSocket(serverUrl)
-    wsRef.current = ws
-
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = () => {
-        setConnectionState('connected')
-        log('已连接服务器')
-        resolve()
-        if (pendingRef.current) {
-          ws.send(JSON.stringify(pendingRef.current))
-          pendingRef.current = null
-        }
-      }
-      ws.onerror = () => {
-        setConnectionState('error')
-        reject(new Error('ws error'))
-      }
-      ws.onclose = () => {
-        setConnectionState('disconnected')
-        log('连接已断开')
-      }
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data) as WSMessage
-        handleMessage(msg)
-      }
-    })
-  }, [log, serverUrl])
-
-  const send = useCallback(
-    (type: string, payload: unknown) => {
-      const ws = wsRef.current
-      const msg: WSMessage = { type, payload }
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        pendingRef.current = msg
-        connect().catch(() => log('无法连接服务器'))
-        return
-      }
-      ws.send(JSON.stringify(msg))
-    },
-    [connect, log],
-  )
-
   const handleMessage = useCallback(
     (msg: WSMessage) => {
       switch (msg.type) {
@@ -186,6 +135,61 @@ export function usePokerClient() {
       }
     },
     [log],
+  )
+
+  const connect = useCallback(async () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      return
+    }
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+      return
+    }
+
+    setConnectionState('connecting')
+    const ws = new WebSocket(serverUrl)
+    wsRef.current = ws
+
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => {
+        setConnectionState('connected')
+        log('已连接服务器')
+        resolve()
+        if (pendingRef.current) {
+          ws.send(JSON.stringify(pendingRef.current))
+          pendingRef.current = null
+        }
+      }
+      ws.onerror = () => {
+        setConnectionState('error')
+        reject(new Error('ws error'))
+      }
+      ws.onclose = () => {
+        setConnectionState('disconnected')
+        log('连接已断开')
+      }
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data) as WSMessage
+          handleMessage(msg)
+        } catch {
+          log('收到无法解析的服务器消息')
+        }
+      }
+    })
+  }, [handleMessage, log, serverUrl])
+
+  const send = useCallback(
+    (type: string, payload: unknown) => {
+      const ws = wsRef.current
+      const msg: WSMessage = { type, payload }
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        pendingRef.current = msg
+        connect().catch(() => log('无法连接服务器'))
+        return
+      }
+      ws.send(JSON.stringify(msg))
+    },
+    [connect, log],
   )
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionBar } from './game/ActionBar'
 import { TableScene } from './game/TableScene'
 import { PlayerAvatar } from './PlayerAvatar'
@@ -57,6 +57,7 @@ function SettlementPanel({ showdown, onClose }: { showdown: ShowdownPayload; onC
 
 export function GameShell() {
   const { serverUrl, setServerUrl, connectionState, state, rooms, logs, showdown, profile, connect, api } = usePokerClient()
+  const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const [overlayOpen, setOverlayOpen] = useState(true)
   const [mode, setMode] = useState<OverlayMode>('create')
   const [panelMode, setPanelMode] = useState<PanelMode>('room')
@@ -81,26 +82,42 @@ export function GameShell() {
 
   useEffect(() => {
     if (state?.roomCode) {
-      setOverlayOpen(false)
+      queueMicrotask(() => setOverlayOpen(false))
     }
   }, [state?.roomCode])
 
   useEffect(() => {
     api.getProfile({ playerId: getStoredProfileId(), name: playerName || '玩家' })
-  }, [])
+  }, [api, playerName])
 
   useEffect(() => {
     if (profile?.name) {
-      setPlayerName(profile.name)
-      setProfileName(profile.name)
+      queueMicrotask(() => {
+        setPlayerName(profile.name)
+        setProfileName(profile.name)
+      })
     }
   }, [profile?.name])
 
   useEffect(() => {
     if (showdown) {
-      setShowSettlement(true)
+      queueMicrotask(() => setShowSettlement(true))
     }
   }, [showdown])
+
+  useEffect(() => {
+    if (!profileOpen) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (profileMenuRef.current?.contains(target)) return
+      setProfileOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [profileOpen])
 
   const canSubmit = playerName.trim().length > 0
   const profileId = profile?.id ?? getStoredProfileId()
@@ -126,40 +143,42 @@ export function GameShell() {
           <button className="btn tiny secondary" onClick={() => connect()}>
             连接
           </button>
-          <button
-            className={`profileTrigger ${profileOpen ? 'open' : ''}`}
-            onClick={() => setProfileOpen((value) => !value)}
-            aria-label="打开个人信息"
-            aria-expanded={profileOpen}
-          >
-            <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
-          </button>
+          <div className="profileMenuAnchor" ref={profileMenuRef}>
+            <button
+              className={`profileTrigger ${profileOpen ? 'open' : ''}`}
+              onClick={() => setProfileOpen((value) => !value)}
+              aria-label="打开个人信息"
+              aria-expanded={profileOpen}
+            >
+              <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
+            </button>
+            {profileOpen ? (
+              <div className="profilePopover">
+                <div className="profileCard profileCardPopover">
+                  <div className="profileAvatarSeed">
+                    <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
+                  </div>
+                  <div>
+                    <div className="profileName">{profile?.name ?? (playerName || '玩家')}</div>
+                    <div className="profileMeta">ID {profileId || '未生成'} · 总筹码 {profile?.chips ?? 0} · 战绩 {profile?.handsWon ?? 0}/{profile?.handsPlayed ?? 0}</div>
+                  </div>
+                </div>
+                <label className="field">
+                  <div className="label">昵称</div>
+                  <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="请输入昵称" />
+                </label>
+                <button
+                  className="btn primary wide"
+                  onClick={() => api.updateProfile({ playerId: profileId, name: profileName.trim() })}
+                >
+                  保存昵称
+                </button>
+              </div>
+            ) : null}
+          </div>
           <button className="btn tiny" onClick={() => setOverlayOpen((v) => !v)}>
             房间
           </button>
-          {profileOpen ? (
-            <div className="profilePopover">
-              <div className="profileCard profileCardPopover">
-                <div className="profileAvatarSeed">
-                  <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
-                </div>
-                <div>
-                  <div className="profileName">{profile?.name ?? (playerName || '玩家')}</div>
-                  <div className="profileMeta">ID {profileId || '未生成'} · 总筹码 {profile?.chips ?? 0} · 战绩 {profile?.handsWon ?? 0}/{profile?.handsPlayed ?? 0}</div>
-                </div>
-              </div>
-              <label className="field">
-                <div className="label">昵称</div>
-                <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="请输入昵称" />
-              </label>
-              <button
-                className="btn primary wide"
-                onClick={() => api.updateProfile({ playerId: profileId, name: profileName.trim() })}
-              >
-                保存昵称
-              </button>
-            </div>
-          ) : null}
         </div>
       </header>
 

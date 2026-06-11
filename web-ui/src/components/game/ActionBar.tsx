@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { StatePayload } from '../../protocol'
 
 type Props = {
@@ -31,10 +31,6 @@ export function ActionBar({ state, onStartGame, onAction }: Props) {
   const [slider, setSlider] = useState<number>(minValue)
 
   const sliderValue = useMemo(() => clamp(slider, minValue, maxValue), [slider, minValue, maxValue])
-
-  useEffect(() => {
-    setSlider((prev) => clamp(prev, minValue, maxValue))
-  }, [maxValue, minValue])
 
   const quick = useMemo(() => {
     const pot = state.pot
