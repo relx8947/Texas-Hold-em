@@ -266,6 +266,76 @@ func (s *Storage) AdjustProfileChips(id string, delta int) (ProfileRecord, error
 	return s.LoadProfile(id)
 }
 
+func (s *Storage) DebitProfileChips(id string, amount int) (ProfileRecord, bool, error) {
+	if amount <= 0 {
+		record, err := s.LoadProfile(id)
+		return record, true, err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ProfileRecord{}, false, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`UPDATE profiles SET chips = chips - ?, updated_at = ? WHERE id = ? AND chips >= ?`,
+		amount,
+		time.Now().Unix(),
+		id,
+		amount,
+	)
+	if err != nil {
+		return ProfileRecord{}, false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ProfileRecord{}, false, err
+	}
+	if affected == 0 {
+		var current ProfileRecord
+		var updatedAt int64
+		err := tx.QueryRow(
+			`SELECT id, name, avatar_seed, chips, hands_played, hands_won, updated_at FROM profiles WHERE id = ?`,
+			id,
+		).Scan(
+			&current.ID,
+			&current.Name,
+			&current.AvatarSeed,
+			&current.Chips,
+			&current.HandsPlayed,
+			&current.HandsWon,
+			&updatedAt,
+		)
+		if err != nil {
+			return ProfileRecord{}, false, err
+		}
+		current.UpdatedAt = time.Unix(updatedAt, 0)
+		return current, false, nil
+	}
+
+	var record ProfileRecord
+	var updatedAt int64
+	if err := tx.QueryRow(
+		`SELECT id, name, avatar_seed, chips, hands_played, hands_won, updated_at FROM profiles WHERE id = ?`,
+		id,
+	).Scan(
+		&record.ID,
+		&record.Name,
+		&record.AvatarSeed,
+		&record.Chips,
+		&record.HandsPlayed,
+		&record.HandsWon,
+		&updatedAt,
+	); err != nil {
+		return ProfileRecord{}, false, err
+	}
+	record.UpdatedAt = time.Unix(updatedAt, 0)
+	if err := tx.Commit(); err != nil {
+		return ProfileRecord{}, false, err
+	}
+	return record, true, nil
+}
+
 func (s *Storage) DeletePlayer(playerID string) error {
 	_, err := s.db.Exec(`DELETE FROM players WHERE id = ?`, playerID)
 	return err

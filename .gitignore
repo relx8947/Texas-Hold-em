@@ -16,6 +16,7 @@ build/
 *.test
 *.out
 coverage.out
+server/texas-holdem-lan
 
 # Local runtime data
 *.db

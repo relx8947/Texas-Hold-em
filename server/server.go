@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -279,6 +281,8 @@ type PlayerSnapshot struct {
 var (
 	idRandMu sync.Mutex
 	idRand   = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	connWriteLocks sync.Map
 )
 
 func NewServer(storage *Storage) *Server {
@@ -294,86 +298,38 @@ func (s *Server) LoadFromStorage() error {
 		return err
 	}
 	for _, record := range roomRecords {
-		room := &Room{
-			Server:     s,
-			Code:       record.Code,
-			MaxPlayers: record.MaxPlayers,
-			HostID:     record.HostID,
-			Seats:      make([]*Player, record.MaxPlayers),
-			CreatedAt:  record.CreatedAt,
-		}
-		room.Game = NewGame(room)
-		room.Game.Stage = "waiting"
-
 		players, err := s.storage.LoadPlayers(record.Code)
 		if err != nil {
 			return err
 		}
-		now := time.Now()
 		for _, p := range players {
-			if p.PendingRemoval {
-				_ = s.storage.DeletePlayer(p.ID)
-				continue
-			}
-			if p.DisconnectedAt != nil && now.Sub(*p.DisconnectedAt) > disconnectTimeout {
-				_ = s.storage.DeletePlayer(p.ID)
-				continue
-			}
-			seat := p.Seat
-			if seat < 0 || seat >= room.MaxPlayers || room.Seats[seat] != nil {
-				seat = room.firstEmptySeatLocked()
-				if seat == -1 {
-					continue
-				}
-			}
-			player := &Player{
-				ID:             p.ID,
-				ProfileID:      firstNonEmpty(p.ProfileID, p.ID),
-				Name:           p.Name,
-				AvatarSeed:     firstNonEmpty(p.AvatarSeed, p.ID),
-				Seat:           seat,
-				Chips:          p.Chips,
-				Connected:      false,
-				SittingOut:     p.SittingOut,
-				PendingRemoval: false,
-				DisconnectedAt: p.DisconnectedAt,
-			}
-			room.Seats[seat] = player
+			_ = s.settleStoredPlayerRecord(p)
 		}
-
-		chat, err := s.storage.LoadChat(record.Code)
-		if err != nil {
-			return err
-		}
-		room.Chat = chat
-		room.ensureHostLocked()
-
-		empty := true
-		for _, p := range room.Seats {
-			if p != nil {
-				empty = false
-				break
-			}
-		}
-		if empty {
-			_ = s.storage.DeleteRoom(room.Code)
-			continue
-		}
-
-		s.rooms[room.Code] = room
+		_ = s.storage.DeleteRoom(record.Code)
 	}
 	return nil
 }
 
+func (s *Server) settleStoredPlayerRecord(player PlayerRecord) error {
+	if s.storage == nil || player.Chips <= 0 {
+		return nil
+	}
+	_, err := s.storage.AdjustProfileChips(firstNonEmpty(player.ProfileID, player.ID), player.Chips)
+	return err
+}
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin: isAllowedWSOrigin,
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+		connWriteLocks.Delete(conn)
+	}()
 
 	var room *Room
 	var player *Player
@@ -559,16 +515,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "补码金额无效")
 				continue
 			}
-			profile, err := s.ensureProfile(player.ProfileID, player.Name)
+			_, err := s.ensureProfile(player.ProfileID, player.Name)
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
 			}
-			if profile.Chips < payload.Amount {
-				writeError(conn, fmt.Sprintf("总筹码不足，当前剩余%d", profile.Chips))
-				continue
-			}
-			updatedProfile, err := s.adjustProfileChips(player.ProfileID, -payload.Amount)
+			updatedProfile, err := s.debitProfileChips(player.ProfileID, payload.Amount)
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
@@ -630,10 +582,7 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 		return nil, nil, err
 	}
 	buyIn := sanitizeBuyIn(payload.BuyIn)
-	if profile.Chips < buyIn {
-		return nil, nil, fmt.Errorf("总筹码不足，当前剩余%d", profile.Chips)
-	}
-	updatedProfile, err := s.adjustProfileChips(profile.ID, -buyIn)
+	updatedProfile, err := s.debitProfileChips(profile.ID, buyIn)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -755,10 +704,7 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 	if room.isFullLocked() {
 		return nil, nil, errors.New("房间已满")
 	}
-	if profile.Chips < buyIn {
-		return nil, nil, fmt.Errorf("总筹码不足，当前剩余%d", profile.Chips)
-	}
-	updatedProfile, err := s.adjustProfileChips(profile.ID, -buyIn)
+	updatedProfile, err := s.debitProfileChips(profile.ID, buyIn)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -884,6 +830,29 @@ func (s *Server) adjustProfileChips(profileID string, delta int) (ProfileRespons
 	record, err := s.storage.AdjustProfileChips(profileID, delta)
 	if err != nil {
 		return ProfileResponse{}, err
+	}
+	return profileResponse(record), nil
+}
+
+func (s *Server) debitProfileChips(profileID string, amount int) (ProfileResponse, error) {
+	if profileID == "" {
+		return ProfileResponse{}, errors.New("玩家资料不存在")
+	}
+	if amount <= 0 {
+		return s.adjustProfileChips(profileID, 0)
+	}
+	if s.storage == nil {
+		if initialProfileChips < amount {
+			return ProfileResponse{}, fmt.Errorf("总筹码不足，当前剩余%d", initialProfileChips)
+		}
+		return ProfileResponse{ID: profileID, AvatarSeed: stableAvatarSeed(profileID), Chips: initialProfileChips - amount}, nil
+	}
+	record, ok, err := s.storage.DebitProfileChips(profileID, amount)
+	if err != nil {
+		return ProfileResponse{}, err
+	}
+	if !ok {
+		return ProfileResponse{}, fmt.Errorf("总筹码不足，当前剩余%d", record.Chips)
 	}
 	return profileResponse(record), nil
 }
@@ -1451,13 +1420,25 @@ func buildPlayerSnapshot(player *Player) PlayerSnapshot {
 }
 
 func (p *Player) send(msg WSMessage) error {
-	p.sendMu.Lock()
-	defer p.sendMu.Unlock()
-	return p.Conn.WriteJSON(msg)
+	if p.Conn == nil {
+		return nil
+	}
+	return writeConnJSON(p.Conn, msg)
 }
 
 func writeJSON(conn *websocket.Conn, msg WSMessage) {
-	_ = conn.WriteJSON(msg)
+	if conn == nil {
+		return
+	}
+	_ = writeConnJSON(conn, msg)
+}
+
+func writeConnJSON(conn *websocket.Conn, msg WSMessage) error {
+	lockValue, _ := connWriteLocks.LoadOrStore(conn, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	return conn.WriteJSON(msg)
 }
 
 func writeError(conn *websocket.Conn, message string) {
@@ -1465,6 +1446,42 @@ func writeError(conn *websocket.Conn, message string) {
 		Type:    "error",
 		Payload: mustJSON(map[string]string{"message": message}),
 	})
+}
+
+func isAllowedWSOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := originURL.Hostname()
+	if originHost == "" {
+		return false
+	}
+	requestHost, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		requestHost = r.Host
+	}
+	if strings.EqualFold(originHost, requestHost) || isLoopbackHost(originHost) || isPrivateHost(originHost) {
+		return true
+	}
+	return false
+}
+
+func isLoopbackHost(host string) bool {
+	normalized := strings.Trim(strings.ToLower(host), "[]")
+	return normalized == "localhost" || normalized == "127.0.0.1" || normalized == "::1"
+}
+
+func isPrivateHost(host string) bool {
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLoopback()
 }
 
 func mustJSON(v interface{}) json.RawMessage {
