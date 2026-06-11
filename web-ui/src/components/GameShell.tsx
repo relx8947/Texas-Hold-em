@@ -136,14 +136,7 @@ export function GameShell() {
         <main className="loginPanel">
           <div className="loginKicker">Texas Hold&apos;em LAN</div>
           <h1>登录</h1>
-          <label className="field">
-            <div className="label">服务器地址</div>
-            <input
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              placeholder={`ws://${location.hostname}:8080/ws`}
-            />
-          </label>
+          <p>输入用户名后进入游戏。</p>
           <label className="field">
             <div className="label">用户名</div>
             <input
@@ -162,12 +155,6 @@ export function GameShell() {
           >
             {authState === 'authenticating' ? '登录中...' : '进入'}
           </button>
-          <div className={`hudStatus ${connectionState}`}>{connectionState}</div>
-          <div className="loginLogs">
-            {logs.slice(0, 4).map((log) => (
-              <div key={log} className="logItem">{log}</div>
-            ))}
-          </div>
         </main>
       </div>
     )
