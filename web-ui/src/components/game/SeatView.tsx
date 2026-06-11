@@ -34,7 +34,12 @@ export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, 
 
       <div className="seatMain">
         <div className="avatarRing">
-          <PlayerAvatar seed={player?.avatarSeed ?? label} name={player?.name ?? emptySeatLabel} label={player ? label : emptySeatLabel} />
+          <PlayerAvatar
+            seed={player?.avatarSeed ?? label}
+            name={player?.name ?? emptySeatLabel}
+            label={player ? label : emptySeatLabel}
+            showMonogram={false}
+          />
           {player && isHost ? <div className="hostBadge">房主</div> : null}
           {player?.dealer && <div className="dealerBadge">D</div>}
         </div>

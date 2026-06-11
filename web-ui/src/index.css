@@ -23,7 +23,9 @@ body {
   min-width: 320px;
   height: 100%;
   overflow: hidden;
-  background-color: #c4241d;
+  background:
+    radial-gradient(900px 500px at 50% -10%, rgba(244, 206, 100, 0.16), transparent 52%),
+    linear-gradient(180deg, #163730 0%, #0b1d1c 100%);
   color: #5a2a12;
 }
 

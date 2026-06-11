@@ -5,6 +5,7 @@ type PlayerAvatarProps = {
   name?: string
   label?: string
   className?: string
+  showMonogram?: boolean
 }
 
 function seedHash(seed: string) {
@@ -15,27 +16,36 @@ function seedHash(seed: string) {
   return hash
 }
 
-export function PlayerAvatar({ seed, name, label, className = '' }: PlayerAvatarProps) {
+function getAvatarInitial(name?: string, label?: string) {
+  const text = (name || label || '玩家').trim()
+  const latinMatch = text.match(/[A-Za-z0-9]/)
+  if (latinMatch) return latinMatch[0].toUpperCase()
+  return text[0] ?? '玩'
+}
+
+export function PlayerAvatar({ seed, name, label, className = '', showMonogram = true }: PlayerAvatarProps) {
   const hash = seedHash(seed || name || label || 'player')
+  const initial = getAvatarInitial(name, label)
   const palettes = [
-    { base: '#14b8a6', edge: '#0f766e', accent: '#ffd75e', hair: '#4a2a18', shirt: '#ef4444' },
-    { base: '#60a5fa', edge: '#2563eb', accent: '#fbbf24', hair: '#111827', shirt: '#22c55e' },
-    { base: '#fb7185', edge: '#be123c', accent: '#fde68a', hair: '#6b2c12', shirt: '#3b82f6' },
-    { base: '#a78bfa', edge: '#6d28d9', accent: '#f9a8d4', hair: '#2f1b46', shirt: '#f97316' },
-    { base: '#f59e0b', edge: '#b45309', accent: '#fff7ed', hair: '#3f2a16', shirt: '#0891b2' },
-    { base: '#84cc16', edge: '#4d7c0f', accent: '#fef3c7', hair: '#27272a', shirt: '#dc2626' },
+    { base: '#0f766e', edge: '#134e4a', accent: '#f6c453', ink: '#f8f2df', soft: '#5eead4' },
+    { base: '#1d4ed8', edge: '#172554', accent: '#f3b23c', ink: '#f8f4eb', soft: '#93c5fd' },
+    { base: '#b91c1c', edge: '#4c0519', accent: '#f7d27a', ink: '#fff4e6', soft: '#fca5a5' },
+    { base: '#6d28d9', edge: '#312e81', accent: '#ffd166', ink: '#faf5ff', soft: '#c4b5fd' },
+    { base: '#b45309', edge: '#451a03', accent: '#ffe29a', ink: '#fff7ed', soft: '#fdba74' },
+    { base: '#166534', edge: '#14532d', accent: '#f4ce64', ink: '#f7fee7', soft: '#86efac' },
   ]
   const palette = palettes[hash % palettes.length]
-  const hairStyle = hash % 3
-  const skin = ['#ffd7b3', '#f6c28b', '#e9a66f', '#f3c6a3'][hash % 4]
-  const cheek = hash % 2 === 0 ? '#ff9aa8' : '#f59e9e'
-  const smile = hash % 2 === 0 ? 'M26 32c2.2 2 9.8 2 12 0' : 'M27 32c2.5 1.4 7.5 1.4 10 0'
+  const suitSymbols = ['♠', '♥', '♣', '♦'] as const
+  const suit = suitSymbols[(hash >> 3) % suitSymbols.length]
+  const stripeOffset = 18 + (hash % 10)
+  const bandHeight = 12 + ((hash >> 5) % 6)
+  const orbitRadius = 17 + ((hash >> 7) % 4)
   const style = {
     '--avatar-base': palette.base,
     '--avatar-edge': palette.edge,
     '--avatar-accent': palette.accent,
-    '--avatar-hair': palette.hair,
-    '--avatar-shirt': palette.shirt,
+    '--avatar-ink': palette.ink,
+    '--avatar-soft': palette.soft,
     '--avatar-angle': `${hash % 360}deg`,
   } as CSSProperties
 
@@ -47,35 +57,55 @@ export function PlayerAvatar({ seed, name, label, className = '' }: PlayerAvatar
             <stop stopColor="var(--avatar-base)" />
             <stop offset="1" stopColor="var(--avatar-edge)" />
           </linearGradient>
-          <linearGradient id={`avatarShirt-${hash}`} x1="16" x2="48" y1="38" y2="62" gradientUnits="userSpaceOnUse">
-            <stop stopColor="var(--avatar-shirt)" />
-            <stop offset="1" stopColor="var(--avatar-edge)" />
+          <linearGradient id={`avatarBand-${hash}`} x1="18" x2="54" y1="14" y2="46" gradientUnits="userSpaceOnUse">
+            <stop stopColor="rgba(255,255,255,0.28)" />
+            <stop offset="1" stopColor="rgba(255,255,255,0.02)" />
           </linearGradient>
         </defs>
         <circle cx="32" cy="32" r="30" fill={`url(#avatarBg-${hash})`} />
-        <circle cx="20" cy="14" r="9" fill="rgba(255,255,255,0.22)" />
         <path
-          d="M14 59c2.3-13 9.5-20 18-20s15.7 7 18 20"
-          fill={`url(#avatarShirt-${hash})`}
-          stroke="rgba(255,255,255,0.72)"
-          strokeWidth="3"
-          strokeLinecap="round"
+          d={`M-8 ${stripeOffset}C8 ${stripeOffset - 8} 18 ${stripeOffset + 9} 32 ${stripeOffset + 3}S56 ${stripeOffset - 7} 72 ${stripeOffset + 8}V72H-8Z`}
+          fill={`url(#avatarBand-${hash})`}
         />
-        <circle cx="32" cy="26" r="14" fill={skin} />
-        {hairStyle === 0 ? (
-          <path d="M19 24c1-10 8-15 16-13 7 1.5 11 7 10 15-7-4-15-7-26-2Z" fill="var(--avatar-hair)" />
-        ) : hairStyle === 1 ? (
-          <path d="M20 23c2-9 8-13 16-12 6 1 10 6 9 14-5-3-9-4-13-4-4.2 0-8 .8-12 2Z" fill="var(--avatar-hair)" />
-        ) : (
-          <path d="M18 26c1-11 8-16 17-15 6.5.7 11 6 10 15-4-5-8-6-13-6-5.2 0-9 1.5-14 6Z" fill="var(--avatar-hair)" />
-        )}
-        <circle cx="27" cy="27" r="1.7" fill="#3f2a1d" />
-        <circle cx="37" cy="27" r="1.7" fill="#3f2a1d" />
-        <circle cx="24" cy="31" r="2.2" fill={cheek} opacity="0.72" />
-        <circle cx="40" cy="31" r="2.2" fill={cheek} opacity="0.72" />
-        <path d={smile} fill="none" stroke="#8a4b2b" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="49" cy="48" r="8.5" fill="var(--avatar-accent)" stroke="#fffaf0" strokeWidth="2" />
-        <circle cx="49" cy="48" r="4.5" fill="none" stroke="rgba(138,75,22,0.55)" strokeWidth="2" />
+        <circle cx="46" cy="17" r="9" fill="rgba(255,255,255,0.12)" />
+        <circle
+          cx="32"
+          cy="32"
+          r={orbitRadius}
+          fill="none"
+          stroke="rgba(255,255,255,0.16)"
+          strokeWidth="1.5"
+          strokeDasharray="2.4 4.6"
+        />
+        {showMonogram ? (
+          <>
+            <rect x="15" y={42 - bandHeight / 2} width="34" height={bandHeight} rx={bandHeight / 2} fill="rgba(0,0,0,0.12)" />
+            <text
+              x="32"
+              y="37"
+              textAnchor="middle"
+              fill="var(--avatar-ink)"
+              fontSize={initial.length > 1 ? 20 : 24}
+              fontWeight="800"
+              letterSpacing={initial.length > 1 ? 0.5 : 0}
+              fontFamily="inherit"
+            >
+              {initial}
+            </text>
+          </>
+        ) : null}
+        <circle cx="49" cy="49" r="8.5" fill="var(--avatar-accent)" stroke="rgba(255,255,255,0.78)" strokeWidth="2" />
+        <text
+          x="49"
+          y="52"
+          textAnchor="middle"
+          fill={suit === '♥' || suit === '♦' ? '#a8151a' : '#213547'}
+          fontSize="11"
+          fontWeight="800"
+          fontFamily="inherit"
+        >
+          {suit}
+        </text>
       </svg>
     </div>
   )
