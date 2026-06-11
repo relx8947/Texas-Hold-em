@@ -26,7 +26,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-默认服务地址为 `http://localhost:8080`。首次进入需要注册用户，之后登录成功才能进入房间大厅和牌桌界面。
+默认服务地址为 `http://localhost:8080`。首次输入新用户名会自动创建用户；已存在用户名会直接登录并进入房间大厅。
 
 ## 关键环境变量
 

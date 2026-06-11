@@ -7,7 +7,6 @@ import type {
   LoginPayload,
   PlayerActionPayload,
   PlayerProfile,
-  RegisterPayload,
   RoomSummary,
   ShowdownPayload,
   StatePayload,
@@ -222,10 +221,6 @@ export function usePokerClient() {
       login: (payload: LoginPayload) => {
         setAuthState('authenticating')
         send('login', payload)
-      },
-      register: (payload: RegisterPayload) => {
-        setAuthState('authenticating')
-        send('register', payload)
       },
       getProfile: (payload: { playerId: string; name: string }) => send('get_profile', payload),
       updateProfile: (payload: { playerId: string; name: string }) => send('update_profile', payload),

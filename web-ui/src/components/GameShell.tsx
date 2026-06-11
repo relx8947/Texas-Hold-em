@@ -8,7 +8,6 @@ import './GameShell.css'
 
 type OverlayMode = 'create' | 'join'
 type PanelMode = 'room' | 'logs'
-type AuthMode = 'login' | 'register'
 
 function formatCards(cards: string[]) {
   return cards.map((card) => card.replace('T', '10')).join(' ')
@@ -62,10 +61,8 @@ export function GameShell() {
   const [overlayOpen, setOverlayOpen] = useState(true)
   const [mode, setMode] = useState<OverlayMode>('create')
   const [panelMode, setPanelMode] = useState<PanelMode>('room')
-  const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [profileOpen, setProfileOpen] = useState(false)
   const [username, setUsername] = useState(() => localStorage.getItem('username') ?? '')
-  const [password, setPassword] = useState('')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [roomCode, setRoomCode] = useState('')
@@ -123,22 +120,13 @@ export function GameShell() {
   const canSubmit = playerName.trim().length > 0
   const isAuthed = authState === 'authenticated'
   const profileId = profile?.id ?? getStoredProfileId()
-  const canAuth = username.trim().length > 0 && password.length > 0 && (authMode === 'login' || playerName.trim().length > 0)
+  const canAuth = username.trim().length > 0
 
   const submitAuth = () => {
     if (!canAuth) return
     localStorage.setItem('username', username.trim())
-    if (authMode === 'login') {
-      api.login({
-        username: username.trim(),
-        password,
-      })
-      return
-    }
-    api.register({
+    api.login({
       username: username.trim(),
-      password,
-      playerName: playerName.trim(),
     })
   }
 
@@ -147,16 +135,7 @@ export function GameShell() {
       <div className="gameShell loginShell">
         <main className="loginPanel">
           <div className="loginKicker">Texas Hold&apos;em LAN</div>
-          <h1>{authMode === 'login' ? '登录账号' : '注册玩家'}</h1>
-          <p>只有注册后的用户登录成功，才能进入房间大厅和牌桌界面。</p>
-          <div className="overlayTabs authTabs">
-            <button className={`tab ${authMode === 'login' ? 'active' : ''}`} onClick={() => setAuthMode('login')}>
-              登录
-            </button>
-            <button className={`tab ${authMode === 'register' ? 'active' : ''}`} onClick={() => setAuthMode('register')}>
-              注册
-            </button>
-          </div>
+          <h1>登录</h1>
           <label className="field">
             <div className="label">服务器地址</div>
             <input
@@ -167,32 +146,21 @@ export function GameShell() {
           </label>
           <label className="field">
             <div className="label">用户名</div>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="请输入用户名" />
-          </label>
-          <label className="field">
-            <div className="label">密码</div>
             <input
-              value={password}
-              type="password"
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={authMode === 'register' ? '至少 6 个字符' : '请输入密码'}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="首次使用会自动创建用户"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') submitAuth()
               }}
             />
           </label>
-          {authMode === 'register' ? (
-            <label className="field">
-              <div className="label">游戏昵称</div>
-              <input value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="牌桌展示昵称" />
-            </label>
-          ) : null}
           <button
             className="btn primary wide"
             disabled={!canAuth || authState === 'authenticating'}
             onClick={submitAuth}
           >
-            {authState === 'authenticating' ? '处理中...' : authMode === 'login' ? '登录' : '注册并登录'}
+            {authState === 'authenticating' ? '登录中...' : '进入'}
           </button>
           <div className={`hudStatus ${connectionState}`}>{connectionState}</div>
           <div className="loginLogs">

@@ -1,11 +1,9 @@
 package main
 
 import (
-	crand "crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -120,13 +118,6 @@ type JoinRoomPayload struct {
 
 type LoginPayload struct {
 	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-type RegisterPayload struct {
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	PlayerName string `json:"playerName"`
 }
 
 type KickPayload struct {
@@ -408,23 +399,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			profile, err := s.login(payload)
-			if err != nil {
-				writeError(conn, err.Error())
-				continue
-			}
-			authenticated = true
-			sessionProfile = profile
-			writeJSON(conn, WSMessage{Type: "login_ok", Payload: mustJSON(profile)})
-			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
-			continue
-		}
-		if msg.Type == "register" {
-			var payload RegisterPayload
-			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-				writeError(conn, "参数错误")
-				continue
-			}
-			profile, err := s.register(payload)
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
@@ -836,64 +810,25 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 	if username == "" {
 		return ProfileResponse{}, errors.New("请输入用户名")
 	}
-	if strings.TrimSpace(payload.Password) == "" {
-		return ProfileResponse{}, errors.New("请输入密码")
-	}
 	user, err := s.storage.LoadUser(username)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ProfileResponse{}, errors.New("用户不存在")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return ProfileResponse{}, err
 		}
-		return ProfileResponse{}, err
-	}
-	if !verifyPassword(user.PasswordHash, payload.Password) {
-		return ProfileResponse{}, errors.New("用户名或密码错误")
+		profile, err := s.ensureProfile(randomID(), username)
+		if err != nil {
+			return ProfileResponse{}, err
+		}
+		if _, err := s.storage.CreateUser(username, "", ProfileRecord{ID: profile.ID}); err != nil {
+			return ProfileResponse{}, err
+		}
+		return profile, nil
 	}
 	profile, err := s.storage.LoadProfile(user.ProfileID)
 	if err != nil {
 		return ProfileResponse{}, err
 	}
 	return profileResponse(profile), nil
-}
-
-func (s *Server) register(payload RegisterPayload) (ProfileResponse, error) {
-	username := normalizeUsername(payload.Username)
-	if username == "" {
-		return ProfileResponse{}, errors.New("请输入用户名")
-	}
-	if len(username) < 3 || len(username) > 24 {
-		return ProfileResponse{}, errors.New("用户名需为3-24个字符")
-	}
-	password := strings.TrimSpace(payload.Password)
-	if len(password) < 6 {
-		return ProfileResponse{}, errors.New("密码至少6个字符")
-	}
-	name := strings.TrimSpace(payload.PlayerName)
-	if name == "" {
-		return ProfileResponse{}, errors.New("请输入昵称")
-	}
-	if len([]rune(name)) > 16 {
-		return ProfileResponse{}, errors.New("昵称最多16个字符")
-	}
-	profileID := randomID()
-	profile, err := s.ensureProfile(profileID, name)
-	if err != nil {
-		return ProfileResponse{}, err
-	}
-	passwordHash, err := hashPassword(password)
-	if err != nil {
-		return ProfileResponse{}, err
-	}
-	_, err = s.storage.CreateUser(username, passwordHash, ProfileRecord{
-		ID:         profile.ID,
-		Name:       profile.Name,
-		AvatarSeed: profile.AvatarSeed,
-		Chips:      profile.Chips,
-	})
-	if err != nil {
-		return ProfileResponse{}, errors.New("用户名已被注册")
-	}
-	return profile, nil
 }
 
 func (s *Server) listRooms() []RoomSummary {
@@ -1702,44 +1637,6 @@ func verifySecret(hash string, secret string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(candidate)) == 1
-}
-
-func hashPassword(password string) (string, error) {
-	salt := make([]byte, 16)
-	if _, err := crand.Read(salt); err != nil {
-		return "", err
-	}
-	digest := passwordDigest(password, salt)
-	return fmt.Sprintf("v1$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(digest)), nil
-}
-
-func verifyPassword(stored string, password string) bool {
-	parts := strings.Split(stored, "$")
-	if len(parts) != 3 || parts[0] != "v1" {
-		return false
-	}
-	salt, err := hex.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-	expected, err := hex.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-	actual := passwordDigest(password, salt)
-	return subtle.ConstantTimeCompare(expected, actual) == 1
-}
-
-func passwordDigest(password string, salt []byte) []byte {
-	sum := sha256.Sum256(append(append([]byte{}, salt...), []byte(password)...))
-	digest := sum[:]
-	for i := 0; i < 100_000; i++ {
-		next := sha256.Sum256(append(append([]byte{}, digest...), []byte(password)...))
-		digest = next[:]
-	}
-	out := make([]byte, len(digest))
-	copy(out, digest)
-	return out
 }
 
 func mustJSON(v interface{}) json.RawMessage {
