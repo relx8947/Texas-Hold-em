@@ -51,6 +51,12 @@ type UserRecord struct {
 	UpdatedAt    time.Time
 }
 
+type ProfileSummary struct {
+	ID    string
+	Name  string
+	Chips int
+}
+
 func NewStorage(path string) (*Storage, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -263,6 +269,27 @@ func (s *Storage) CreateUser(username string, passwordHash string, profile Profi
 	}, nil
 }
 
+func (s *Storage) UpsertUser(username string, passwordHash string, profileID string) (UserRecord, error) {
+	now := time.Now()
+	_, err := s.db.Exec(
+		`INSERT INTO users (username, password_hash, profile_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(username) DO UPDATE SET
+		 password_hash=excluded.password_hash,
+		 profile_id=excluded.profile_id,
+		 updated_at=excluded.updated_at`,
+		username,
+		passwordHash,
+		profileID,
+		now.Unix(),
+		now.Unix(),
+	)
+	if err != nil {
+		return UserRecord{}, err
+	}
+	return s.LoadUser(username)
+}
+
 func (s *Storage) LoadUser(username string) (UserRecord, error) {
 	var record UserRecord
 	var createdAt int64
@@ -305,6 +332,32 @@ func (s *Storage) LoadProfile(id string) (ProfileRecord, error) {
 	}
 	record.UpdatedAt = time.Unix(updatedAt, 0)
 	return record, nil
+}
+
+func (s *Storage) FindProfilesByName(name string) ([]ProfileSummary, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, chips FROM profiles WHERE lower(name) = lower(?) ORDER BY updated_at DESC, id DESC`,
+		name,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var profiles []ProfileSummary
+	for rows.Next() {
+		var item ProfileSummary
+		if err := rows.Scan(&item.ID, &item.Name, &item.Chips); err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, item)
+	}
+	return profiles, nil
+}
+
+func (s *Storage) DeleteProfile(id string) error {
+	_, err := s.db.Exec(`DELETE FROM profiles WHERE id = ?`, id)
+	return err
 }
 
 func (s *Storage) UpdateProfileName(id string, name string) (ProfileRecord, error) {

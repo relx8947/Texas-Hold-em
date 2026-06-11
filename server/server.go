@@ -307,6 +307,9 @@ func (s *Server) LoadFromStorage() error {
 	if s.storage == nil {
 		return nil
 	}
+	if err := s.repairUserProfileBindings(); err != nil {
+		return err
+	}
 	roomRecords, err := s.storage.LoadRooms()
 	if err != nil {
 		return err
@@ -320,6 +323,49 @@ func (s *Server) LoadFromStorage() error {
 			_ = s.settleStoredPlayerRecord(p)
 		}
 		_ = s.storage.DeleteRoom(record.Code)
+	}
+	return nil
+}
+
+func (s *Server) repairUserProfileBindings() error {
+	if s.storage == nil {
+		return nil
+	}
+	type binding struct {
+		username       string
+		boundProfileID string
+	}
+	rows, err := s.storage.db.Query(`SELECT username, profile_id FROM users`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	bindings := []binding{}
+	for rows.Next() {
+		var item binding
+		if err := rows.Scan(&item.username, &item.boundProfileID); err != nil {
+			return err
+		}
+		bindings = append(bindings, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, item := range bindings {
+		profiles, err := s.storage.FindProfilesByName(item.username)
+		if err != nil {
+			return err
+		}
+		for _, profile := range profiles {
+			if profile.ID == item.boundProfileID {
+				continue
+			}
+			if err := s.storage.DeleteProfile(profile.ID); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -815,11 +861,27 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return ProfileResponse{}, err
 		}
-		profile, err := s.ensureProfile(randomID(), username)
+		profiles, err := s.storage.FindProfilesByName(username)
 		if err != nil {
 			return ProfileResponse{}, err
 		}
-		if _, err := s.storage.CreateUser(username, "", ProfileRecord{ID: profile.ID}); err != nil {
+		if len(profiles) > 1 {
+			return ProfileResponse{}, errors.New("该用户名存在多条历史资料，请联系管理员修复")
+		}
+		var profile ProfileResponse
+		if len(profiles) == 1 {
+			record, err := s.storage.LoadProfile(profiles[0].ID)
+			if err != nil {
+				return ProfileResponse{}, err
+			}
+			profile = profileResponse(record)
+		} else {
+			profile, err = s.ensureProfile(randomID(), username)
+			if err != nil {
+				return ProfileResponse{}, err
+			}
+		}
+		if _, err := s.storage.UpsertUser(username, "", profile.ID); err != nil {
 			return ProfileResponse{}, err
 		}
 		return profile, nil
