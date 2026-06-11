@@ -7,6 +7,7 @@ export type CreateRoomPayload = {
   playerName: string
   playerId: string
   profileId: string
+  roomName: string
   roomPassword: string
   maxPlayers: number
   buyIn: number
@@ -40,6 +41,7 @@ export type ChatPayload = {
 
 export type RoomSummary = {
   code: string
+  name: string
   players: number
   connected: number
   maxPlayers: number

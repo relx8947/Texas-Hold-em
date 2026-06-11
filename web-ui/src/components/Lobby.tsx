@@ -8,7 +8,7 @@ type Props = {
   connectionState: string
   rooms: RoomSummary[]
   onRefreshRooms: () => void
-  onCreateRoom: (payload: { playerName: string; playerId: string; profileId: string; maxPlayers: number; buyIn: number }) => void
+  onCreateRoom: (payload: { playerName: string; playerId: string; profileId: string; roomName: string; roomPassword: string; maxPlayers: number; buyIn: number }) => void
   onJoinRoom: (payload: {
     playerName: string
     roomCode: string
@@ -31,6 +31,7 @@ export function Lobby({
   const [maxPlayers, setMaxPlayers] = useState(6)
   const [buyIn, setBuyIn] = useState<number | ''>('')
   const [roomCode, setRoomCode] = useState('')
+  const [roomName, setRoomName] = useState('')
 
   const buyInValue = useMemo(() => Number(buyIn || 0), [buyIn])
 
@@ -77,6 +78,10 @@ export function Lobby({
             />
           </label>
           <label className="field">
+            <div className="label">房间名</div>
+            <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="例如 周末德州局" />
+          </label>
+          <label className="field">
             <div className="label">房间号</div>
             <input
               value={roomCode}
@@ -94,6 +99,8 @@ export function Lobby({
                 playerName: playerName.trim(),
                 playerId: '',
                 profileId: getStoredProfileId(),
+                roomName: roomName.trim(),
+                roomPassword: '',
                 maxPlayers,
                 buyIn: buyInValue,
               })
@@ -148,7 +155,7 @@ export function Lobby({
                   })
                 }}
               >
-                <div className="roomCode">{room.code}</div>
+                <div className="roomCode">{room.name || room.code}</div>
                 <div className="roomMeta">
                   玩家：{room.players}/{room.maxPlayers}（在线 {room.connected}）
                 </div>

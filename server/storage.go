@@ -13,6 +13,7 @@ type Storage struct {
 
 type RoomRecord struct {
 	Code         string
+	Name         string
 	MaxPlayers   int
 	HostID       string
 	PasswordHash string
@@ -82,6 +83,7 @@ func (s *Storage) initSchema() error {
 		`PRAGMA foreign_keys = ON;`,
 		`CREATE TABLE IF NOT EXISTS rooms (
 			code TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
 			max_players INTEGER NOT NULL,
 			host_id TEXT NOT NULL,
 			password_hash TEXT NOT NULL DEFAULT '',
@@ -141,6 +143,9 @@ func (s *Storage) initSchema() error {
 	if err := s.addColumnIfMissing("rooms", "password_hash", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.addColumnIfMissing("rooms", "name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(
 		`UPDATE profiles SET chips = ?, updated_at = ? WHERE chips = ? AND hands_played = 0 AND hands_won = 0`,
 		initialProfileChips,
@@ -178,14 +183,16 @@ func (s *Storage) addColumnIfMissing(table string, column string, definition str
 
 func (s *Storage) UpsertRoom(room RoomSnapshot) error {
 	_, err := s.db.Exec(
-		`INSERT INTO rooms (code, max_players, host_id, password_hash, created_at)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO rooms (code, name, max_players, host_id, password_hash, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(code) DO UPDATE SET
+		 name=excluded.name,
 		 max_players=excluded.max_players,
 		 host_id=excluded.host_id,
 		 password_hash=excluded.password_hash,
 		 created_at=excluded.created_at`,
 		room.Code,
+		room.Name,
 		room.MaxPlayers,
 		room.HostID,
 		room.PasswordHash,
@@ -495,7 +502,7 @@ func (s *Storage) InsertChat(roomCode string, message ChatMessage) error {
 }
 
 func (s *Storage) LoadRooms() ([]RoomRecord, error) {
-	rows, err := s.db.Query(`SELECT code, max_players, host_id, password_hash, created_at FROM rooms`)
+	rows, err := s.db.Query(`SELECT code, name, max_players, host_id, password_hash, created_at FROM rooms`)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +512,7 @@ func (s *Storage) LoadRooms() ([]RoomRecord, error) {
 	for rows.Next() {
 		var record RoomRecord
 		var createdAt int64
-		if err := rows.Scan(&record.Code, &record.MaxPlayers, &record.HostID, &record.PasswordHash, &createdAt); err != nil {
+		if err := rows.Scan(&record.Code, &record.Name, &record.MaxPlayers, &record.HostID, &record.PasswordHash, &createdAt); err != nil {
 			return nil, err
 		}
 		record.CreatedAt = time.Unix(createdAt, 0)

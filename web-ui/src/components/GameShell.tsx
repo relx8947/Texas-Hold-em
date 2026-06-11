@@ -66,6 +66,7 @@ export function GameShell() {
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [roomCode, setRoomCode] = useState('')
+  const [roomName, setRoomName] = useState('')
   const [roomPassword, setRoomPassword] = useState('')
   const [maxPlayers, setMaxPlayers] = useState(6)
   const [buyIn, setBuyIn] = useState<number | ''>('')
@@ -324,6 +325,14 @@ export function GameShell() {
             {mode === 'create' ? (
               <>
                 <label className="field">
+                  <div className="label">房间名</div>
+                  <input
+                    value={roomName}
+                    onChange={(e) => setRoomName(e.target.value)}
+                    placeholder="例如 周末德州局"
+                  />
+                </label>
+                <label className="field">
                   <div className="label">最大人数</div>
                   <input
                     value={maxPlayers}
@@ -351,6 +360,7 @@ export function GameShell() {
                       playerName: playerName.trim(),
                       playerId: '',
                       profileId,
+                      roomName: roomName.trim(),
                       roomPassword,
                       maxPlayers,
                       buyIn: Number(buyIn || 0),
@@ -423,6 +433,7 @@ export function GameShell() {
                   }}
                 >
                   <strong>{room.code}</strong>
+                  <span>{room.name || `房间 ${room.code}`}</span>
                   <span>{room.locked ? '锁定 · ' : ''}{room.players}/{room.maxPlayers} · {room.stage} · {room.hostName || '未知房主'}</span>
                 </button>
               ))}

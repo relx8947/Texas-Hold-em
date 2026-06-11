@@ -54,6 +54,7 @@ type Server struct {
 type Room struct {
 	Server         *Server
 	Code           string
+	Name           string
 	MaxPlayers     int
 	HostID         string
 	PasswordHash   string
@@ -102,6 +103,7 @@ type CreateRoomPayload struct {
 	PlayerName   string `json:"playerName"`
 	PlayerID     string `json:"playerId"`
 	ProfileID    string `json:"profileId"`
+	RoomName     string `json:"roomName"`
 	RoomPassword string `json:"roomPassword"`
 	MaxPlayers   int    `json:"maxPlayers"`
 	BuyIn        int    `json:"buyIn"`
@@ -139,6 +141,7 @@ type ProfilePayload struct {
 
 type RoomSummary struct {
 	Code          string `json:"code"`
+	Name          string `json:"name"`
 	Players       int    `json:"players"`
 	Connected     int    `json:"connected"`
 	MaxPlayers    int    `json:"maxPlayers"`
@@ -272,6 +275,7 @@ type gameSnapshot struct {
 
 type RoomSnapshot struct {
 	Code         string
+	Name         string
 	MaxPlayers   int
 	HostID       string
 	PasswordHash string
@@ -710,9 +714,11 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 	profile = updatedProfile
 	maxPlayers := sanitizeMaxPlayers(payload.MaxPlayers)
 	code := randomCode()
+	roomName := sanitizeRoomName(payload.RoomName, code)
 	room := &Room{
 		Server:       s,
 		Code:         code,
+		Name:         roomName,
 		MaxPlayers:   maxPlayers,
 		PasswordHash: hashSecret(payload.RoomPassword),
 		Seats:        make([]*Player, maxPlayers),
@@ -925,6 +931,7 @@ func (s *Server) listRooms() []RoomSummary {
 		room.mu.Unlock()
 		summaries = append(summaries, RoomSummary{
 			Code:          room.Code,
+			Name:          displayRoomName(room.Name, room.Code),
 			Players:       players,
 			Connected:     connected,
 			MaxPlayers:    room.MaxPlayers,
@@ -1410,6 +1417,7 @@ func (r *Room) broadcastState() {
 	}
 	roomSnapshot := RoomSnapshot{
 		Code:         r.Code,
+		Name:         r.Name,
 		MaxPlayers:   r.MaxPlayers,
 		HostID:       r.HostID,
 		PasswordHash: r.PasswordHash,
@@ -1741,6 +1749,25 @@ func firstNonEmpty(values ...string) string {
 
 func normalizeUsername(username string) string {
 	return strings.ToLower(strings.TrimSpace(username))
+}
+
+func sanitizeRoomName(name string, roomCode string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return fmt.Sprintf("房间 %s", roomCode)
+	}
+	runes := []rune(trimmed)
+	if len(runes) > 24 {
+		return string(runes[:24])
+	}
+	return trimmed
+}
+
+func displayRoomName(name string, roomCode string) string {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Sprintf("房间 %s", roomCode)
+	}
+	return name
 }
 
 func sanitizeMaxPlayers(n int) int {
