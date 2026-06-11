@@ -7,6 +7,7 @@ export type CreateRoomPayload = {
   playerName: string
   playerId: string
   profileId: string
+  roomPassword: string
   maxPlayers: number
   buyIn: number
 }
@@ -16,7 +17,14 @@ export type JoinRoomPayload = {
   roomCode: string
   playerId: string
   profileId: string
+  roomPassword: string
   buyIn: number
+}
+
+export type LoginPayload = {
+  playerId: string
+  playerName: string
+  accessCode: string
 }
 
 export type PlayerActionPayload = {
@@ -39,6 +47,7 @@ export type RoomSummary = {
   maxPlayers: number
   stage: string
   hostName: string
+  locked: boolean
   createdAt: number
 }
 

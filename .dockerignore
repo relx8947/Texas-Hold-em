@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.trae
+.vscode
+server/data.db*
+server/texas-holdem-lan
+web-ui/node_modules
+web-ui/dist
+*.log
+.env
+.env.local

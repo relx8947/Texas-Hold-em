@@ -5,6 +5,8 @@
 .idea/
 .trae/
 .vscode/
+.env
+.env.local
 
 # Node/Vite
 node_modules/

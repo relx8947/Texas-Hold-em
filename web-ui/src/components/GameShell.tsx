@@ -56,7 +56,7 @@ function SettlementPanel({ showdown, onClose }: { showdown: ShowdownPayload; onC
 }
 
 export function GameShell() {
-  const { serverUrl, setServerUrl, connectionState, state, rooms, logs, showdown, profile, connect, api } = usePokerClient()
+  const { serverUrl, setServerUrl, connectionState, authState, state, rooms, logs, showdown, profile, connect, api } = usePokerClient()
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const [overlayOpen, setOverlayOpen] = useState(true)
   const [mode, setMode] = useState<OverlayMode>('create')
@@ -64,7 +64,9 @@ export function GameShell() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
+  const [accessCode, setAccessCode] = useState(() => localStorage.getItem('accessCode') ?? '')
   const [roomCode, setRoomCode] = useState('')
+  const [roomPassword, setRoomPassword] = useState('')
   const [maxPlayers, setMaxPlayers] = useState(6)
   const [buyIn, setBuyIn] = useState<number | ''>('')
   const [topUpAmount, setTopUpAmount] = useState<number | ''>(500)
@@ -85,10 +87,6 @@ export function GameShell() {
       queueMicrotask(() => setOverlayOpen(false))
     }
   }, [state?.roomCode])
-
-  useEffect(() => {
-    api.getProfile({ playerId: getStoredProfileId(), name: playerName || '玩家' })
-  }, [api, playerName])
 
   useEffect(() => {
     if (profile?.name) {
@@ -120,7 +118,67 @@ export function GameShell() {
   }, [profileOpen])
 
   const canSubmit = playerName.trim().length > 0
+  const isAuthed = authState === 'authenticated'
   const profileId = profile?.id ?? getStoredProfileId()
+
+  const submitLogin = () => {
+    if (!canSubmit) return
+    localStorage.setItem('accessCode', accessCode)
+    api.login({
+      playerId: getStoredProfileId(),
+      playerName: playerName.trim(),
+      accessCode,
+    })
+  }
+
+  if (!isAuthed) {
+    return (
+      <div className="gameShell loginShell">
+        <main className="loginPanel">
+          <div className="loginKicker">Texas Hold&apos;em LAN</div>
+          <h1>进入好友牌局</h1>
+          <p>先完成轻量登录，服务端会用访问口令保护本次 WebSocket 会话。</p>
+          <label className="field">
+            <div className="label">服务器地址</div>
+            <input
+              value={serverUrl}
+              onChange={(e) => setServerUrl(e.target.value)}
+              placeholder={`ws://${location.hostname}:8080/ws`}
+            />
+          </label>
+          <label className="field">
+            <div className="label">昵称</div>
+            <input value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="请输入昵称" />
+          </label>
+          <label className="field">
+            <div className="label">访问口令</div>
+            <input
+              value={accessCode}
+              type="password"
+              onChange={(e) => setAccessCode(e.target.value)}
+              placeholder="未配置 ACCESS_CODE 时可留空"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitLogin()
+              }}
+            />
+          </label>
+          <button
+            className="btn primary wide"
+            disabled={!canSubmit || authState === 'authenticating'}
+            onClick={submitLogin}
+          >
+            {authState === 'authenticating' ? '登录中...' : '登录并连接'}
+          </button>
+          <div className={`hudStatus ${connectionState}`}>{connectionState}</div>
+          <div className="loginLogs">
+            {logs.slice(0, 4).map((log) => (
+              <div key={log} className="logItem">{log}</div>
+            ))}
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="gameShell">
@@ -256,6 +314,15 @@ export function GameShell() {
               <div className="label">昵称</div>
               <input value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="请输入昵称" />
             </label>
+            <label className="field">
+              <div className="label">房间密码</div>
+              <input
+                value={roomPassword}
+                type="password"
+                onChange={(e) => setRoomPassword(e.target.value)}
+                placeholder={mode === 'create' ? '可选，设置后加入需输入' : '锁定房间需要输入'}
+              />
+            </label>
 
             {mode === 'create' ? (
               <>
@@ -287,6 +354,7 @@ export function GameShell() {
                       playerName: playerName.trim(),
                       playerId: '',
                       profileId,
+                      roomPassword,
                       maxPlayers,
                       buyIn: Number(buyIn || 0),
                     })
@@ -325,6 +393,7 @@ export function GameShell() {
                       roomCode: code,
                       playerId: getStoredPlayerId(code),
                       profileId,
+                      roomPassword,
                       buyIn: Number(buyIn || 0),
                     })
                   }}
@@ -344,17 +413,20 @@ export function GameShell() {
                   className="miniRoom"
                   onClick={() => {
                     setRoomCode(room.code)
-                    api.joinRoom({
-                      playerName: playerName.trim(),
-                      roomCode: room.code,
-                      playerId: getStoredPlayerId(room.code),
-                      profileId,
-                      buyIn: Number(buyIn || 0),
-                    })
+                    if (!room.locked) {
+                      api.joinRoom({
+                        playerName: playerName.trim(),
+                        roomCode: room.code,
+                        playerId: getStoredPlayerId(room.code),
+                        profileId,
+                        roomPassword,
+                        buyIn: Number(buyIn || 0),
+                      })
+                    }
                   }}
                 >
                   <strong>{room.code}</strong>
-                  <span>{room.players}/{room.maxPlayers} · {room.stage} · {room.hostName || '未知房主'}</span>
+                  <span>{room.locked ? '锁定 · ' : ''}{room.players}/{room.maxPlayers} · {room.stage} · {room.hostName || '未知房主'}</span>
                 </button>
               ))}
             </div>

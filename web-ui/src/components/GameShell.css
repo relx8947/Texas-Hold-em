@@ -25,6 +25,53 @@
   opacity: 0.82;
 }
 
+.loginShell {
+  place-items: center;
+  grid-template-rows: minmax(0, 1fr);
+  padding: 24px;
+}
+
+.loginPanel {
+  position: relative;
+  z-index: 1;
+  width: min(440px, calc(100vw - 32px));
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border-radius: 30px;
+  border: 1px solid rgba(244, 206, 100, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 240, 0.98), rgba(255, 239, 210, 0.96));
+  color: #6b3a16;
+  box-shadow: 0 28px 80px rgba(3, 11, 11, 0.38);
+}
+
+.loginPanel h1 {
+  margin: 0;
+  color: var(--hl-red-deep);
+  font-size: 34px;
+  line-height: 1.05;
+}
+
+.loginPanel p {
+  margin: 0 0 4px;
+  color: #8a4b16;
+  font-weight: 700;
+}
+
+.loginKicker {
+  color: var(--hl-gold-deep);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.loginLogs {
+  display: grid;
+  gap: 8px;
+}
+
 .gameHud {
   position: relative;
   display: flex;

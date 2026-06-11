@@ -12,10 +12,11 @@ type Storage struct {
 }
 
 type RoomRecord struct {
-	Code       string
-	MaxPlayers int
-	HostID     string
-	CreatedAt  time.Time
+	Code         string
+	MaxPlayers   int
+	HostID       string
+	PasswordHash string
+	CreatedAt    time.Time
 }
 
 type PlayerRecord struct {
@@ -69,6 +70,7 @@ func (s *Storage) initSchema() error {
 			code TEXT PRIMARY KEY,
 			max_players INTEGER NOT NULL,
 			host_id TEXT NOT NULL,
+			password_hash TEXT NOT NULL DEFAULT '',
 			created_at INTEGER NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS players (
@@ -115,6 +117,9 @@ func (s *Storage) initSchema() error {
 	if err := s.addColumnIfMissing("players", "profile_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.addColumnIfMissing("rooms", "password_hash", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if _, err := s.db.Exec(
 		`UPDATE profiles SET chips = ?, updated_at = ? WHERE chips = ? AND hands_played = 0 AND hands_won = 0`,
 		initialProfileChips,
@@ -152,15 +157,17 @@ func (s *Storage) addColumnIfMissing(table string, column string, definition str
 
 func (s *Storage) UpsertRoom(room RoomSnapshot) error {
 	_, err := s.db.Exec(
-		`INSERT INTO rooms (code, max_players, host_id, created_at)
-		 VALUES (?, ?, ?, ?)
+		`INSERT INTO rooms (code, max_players, host_id, password_hash, created_at)
+		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(code) DO UPDATE SET
 		 max_players=excluded.max_players,
 		 host_id=excluded.host_id,
+		 password_hash=excluded.password_hash,
 		 created_at=excluded.created_at`,
 		room.Code,
 		room.MaxPlayers,
 		room.HostID,
+		room.PasswordHash,
 		room.CreatedAt.Unix(),
 	)
 	return err
@@ -375,7 +382,7 @@ func (s *Storage) InsertChat(roomCode string, message ChatMessage) error {
 }
 
 func (s *Storage) LoadRooms() ([]RoomRecord, error) {
-	rows, err := s.db.Query(`SELECT code, max_players, host_id, created_at FROM rooms`)
+	rows, err := s.db.Query(`SELECT code, max_players, host_id, password_hash, created_at FROM rooms`)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +392,7 @@ func (s *Storage) LoadRooms() ([]RoomRecord, error) {
 	for rows.Next() {
 		var record RoomRecord
 		var createdAt int64
-		if err := rows.Scan(&record.Code, &record.MaxPlayers, &record.HostID, &createdAt); err != nil {
+		if err := rows.Scan(&record.Code, &record.MaxPlayers, &record.HostID, &record.PasswordHash, &createdAt); err != nil {
 			return nil, err
 		}
 		record.CreatedAt = time.Unix(createdAt, 0)

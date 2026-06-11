@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +45,7 @@ func init() {
 
 type Server struct {
 	storage *Storage
+	config  AppConfig
 	rooms   map[string]*Room
 	mu      sync.Mutex
 }
@@ -52,6 +55,7 @@ type Room struct {
 	Code           string
 	MaxPlayers     int
 	HostID         string
+	PasswordHash   string
 	Seats          []*Player
 	Game           *Game
 	Chat           []ChatMessage
@@ -94,19 +98,27 @@ type WSMessage struct {
 }
 
 type CreateRoomPayload struct {
-	PlayerName string `json:"playerName"`
-	PlayerID   string `json:"playerId"`
-	ProfileID  string `json:"profileId"`
-	MaxPlayers int    `json:"maxPlayers"`
-	BuyIn      int    `json:"buyIn"`
+	PlayerName   string `json:"playerName"`
+	PlayerID     string `json:"playerId"`
+	ProfileID    string `json:"profileId"`
+	RoomPassword string `json:"roomPassword"`
+	MaxPlayers   int    `json:"maxPlayers"`
+	BuyIn        int    `json:"buyIn"`
 }
 
 type JoinRoomPayload struct {
-	PlayerName string `json:"playerName"`
-	RoomCode   string `json:"roomCode"`
+	PlayerName   string `json:"playerName"`
+	RoomCode     string `json:"roomCode"`
+	PlayerID     string `json:"playerId"`
+	ProfileID    string `json:"profileId"`
+	RoomPassword string `json:"roomPassword"`
+	BuyIn        int    `json:"buyIn"`
+}
+
+type LoginPayload struct {
 	PlayerID   string `json:"playerId"`
-	ProfileID  string `json:"profileId"`
-	BuyIn      int    `json:"buyIn"`
+	PlayerName string `json:"playerName"`
+	AccessCode string `json:"accessCode"`
 }
 
 type KickPayload struct {
@@ -133,6 +145,7 @@ type RoomSummary struct {
 	MaxPlayers    int    `json:"maxPlayers"`
 	Stage         string `json:"stage"`
 	HostName      string `json:"hostName"`
+	Locked        bool   `json:"locked"`
 	CreatedAtUnix int64  `json:"createdAt"`
 }
 
@@ -259,10 +272,11 @@ type gameSnapshot struct {
 }
 
 type RoomSnapshot struct {
-	Code       string
-	MaxPlayers int
-	HostID     string
-	CreatedAt  time.Time
+	Code         string
+	MaxPlayers   int
+	HostID       string
+	PasswordHash string
+	CreatedAt    time.Time
 }
 
 type PlayerSnapshot struct {
@@ -282,11 +296,12 @@ var (
 	idRandMu sync.Mutex
 	idRand   = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	connWriteLocks sync.Map
+	connWriteLocks    sync.Map
+	connWriteTimeouts sync.Map
 )
 
-func NewServer(storage *Storage) *Server {
-	return &Server{rooms: map[string]*Room{}, storage: storage}
+func NewServer(storage *Storage, config AppConfig) *Server {
+	return &Server{rooms: map[string]*Room{}, storage: storage, config: config}
 }
 
 func (s *Server) LoadFromStorage() error {
@@ -318,23 +333,55 @@ func (s *Server) settleStoredPlayerRecord(player PlayerRecord) error {
 	return err
 }
 
+func (s *Server) startConnHeartbeat(conn *websocket.Conn) func() {
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(s.config.WSPongTimeout))
+	})
+	done := make(chan struct{})
+	ticker := time.NewTicker(s.config.WSPingInterval)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := writeConnMessage(conn, websocket.PingMessage, nil); err != nil {
+					_ = conn.Close()
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		close(done)
+	}
+}
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{
-		CheckOrigin: isAllowedWSOrigin,
+		CheckOrigin: s.isAllowedWSOrigin,
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(s.config.WSReadLimit)
 	defer func() {
 		_ = conn.Close()
 		connWriteLocks.Delete(conn)
+		connWriteTimeouts.Delete(conn)
 	}()
+	connWriteTimeouts.Store(conn, s.config.WSWriteTimeout)
 
 	var room *Room
 	var player *Player
+	authenticated := false
+	stopPing := s.startConnHeartbeat(conn)
+	defer stopPing()
 
 	for {
+		_ = conn.SetReadDeadline(time.Now().Add(s.config.WSPongTimeout))
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			break
@@ -342,6 +389,27 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		var msg WSMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			writeError(conn, "消息格式错误")
+			continue
+		}
+
+		if msg.Type == "login" {
+			var payload LoginPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				writeError(conn, "参数错误")
+				continue
+			}
+			profile, err := s.login(payload)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			authenticated = true
+			writeJSON(conn, WSMessage{Type: "login_ok", Payload: mustJSON(profile)})
+			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
+			continue
+		}
+		if !authenticated {
+			writeError(conn, "请先登录")
 			continue
 		}
 
@@ -590,11 +658,12 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 	maxPlayers := sanitizeMaxPlayers(payload.MaxPlayers)
 	code := randomCode()
 	room := &Room{
-		Server:     s,
-		Code:       code,
-		MaxPlayers: maxPlayers,
-		Seats:      make([]*Player, maxPlayers),
-		CreatedAt:  time.Now(),
+		Server:       s,
+		Code:         code,
+		MaxPlayers:   maxPlayers,
+		PasswordHash: hashSecret(payload.RoomPassword),
+		Seats:        make([]*Player, maxPlayers),
+		CreatedAt:    time.Now(),
 	}
 	room.Game = NewGame(room)
 	player := room.addPlayerLocked(randomID(), profile.ID, profile.Name, profile.AvatarSeed, conn, buyIn)
@@ -624,6 +693,9 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 	s.mu.Unlock()
 	if room == nil {
 		return nil, nil, errors.New("房间不存在")
+	}
+	if !verifySecret(room.PasswordHash, payload.RoomPassword) {
+		return nil, nil, errors.New("房间密码错误")
 	}
 	if strings.TrimSpace(payload.PlayerName) == "" {
 		return nil, nil, errors.New("请输入昵称")
@@ -726,6 +798,20 @@ func (s *Server) sendRoomsList(conn *websocket.Conn) {
 	})
 }
 
+func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
+	if s.config.AccessCode != "" && subtle.ConstantTimeCompare([]byte(payload.AccessCode), []byte(s.config.AccessCode)) != 1 {
+		return ProfileResponse{}, errors.New("访问口令错误")
+	}
+	name := strings.TrimSpace(payload.PlayerName)
+	if name == "" {
+		return ProfileResponse{}, errors.New("请输入昵称")
+	}
+	if len([]rune(name)) > 16 {
+		return ProfileResponse{}, errors.New("昵称最多16个字符")
+	}
+	return s.ensureProfile(payload.PlayerID, name)
+}
+
 func (s *Server) listRooms() []RoomSummary {
 	s.mu.Lock()
 	roomList := make([]*Room, 0, len(s.rooms))
@@ -753,6 +839,7 @@ func (s *Server) listRooms() []RoomSummary {
 			}
 		}
 		stage := room.Game.Stage
+		locked := room.PasswordHash != ""
 		createdAt := room.CreatedAt.Unix()
 		room.mu.Unlock()
 		summaries = append(summaries, RoomSummary{
@@ -762,6 +849,7 @@ func (s *Server) listRooms() []RoomSummary {
 			MaxPlayers:    room.MaxPlayers,
 			Stage:         stage,
 			HostName:      hostName,
+			Locked:        locked,
 			CreatedAtUnix: createdAt,
 		})
 	}
@@ -1240,10 +1328,11 @@ func (r *Room) broadcastState() {
 		lastEvent = &copy
 	}
 	roomSnapshot := RoomSnapshot{
-		Code:       r.Code,
-		MaxPlayers: r.MaxPlayers,
-		HostID:     r.HostID,
-		CreatedAt:  r.CreatedAt,
+		Code:         r.Code,
+		MaxPlayers:   r.MaxPlayers,
+		HostID:       r.HostID,
+		PasswordHash: r.PasswordHash,
+		CreatedAt:    r.CreatedAt,
 	}
 	snapshot := gameSnapshot{
 		Stage:        game.Stage,
@@ -1438,7 +1527,29 @@ func writeConnJSON(conn *websocket.Conn, msg WSMessage) error {
 	lock := lockValue.(*sync.Mutex)
 	lock.Lock()
 	defer lock.Unlock()
+	_ = conn.SetWriteDeadline(time.Now().Add(connWriteTimeout(conn)))
 	return conn.WriteJSON(msg)
+}
+
+func writeConnMessage(conn *websocket.Conn, messageType int, data []byte) error {
+	lockValue, _ := connWriteLocks.LoadOrStore(conn, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	_ = conn.SetWriteDeadline(time.Now().Add(connWriteTimeout(conn)))
+	return conn.WriteMessage(messageType, data)
+}
+
+func connWriteTimeout(conn *websocket.Conn) time.Duration {
+	value, ok := connWriteTimeouts.Load(conn)
+	if !ok {
+		return 10 * time.Second
+	}
+	timeout, ok := value.(time.Duration)
+	if !ok || timeout <= 0 {
+		return 10 * time.Second
+	}
+	return timeout
 }
 
 func writeError(conn *websocket.Conn, message string) {
@@ -1448,10 +1559,15 @@ func writeError(conn *websocket.Conn, message string) {
 	})
 }
 
-func isAllowedWSOrigin(r *http.Request) bool {
+func (s *Server) isAllowedWSOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
+	}
+	for _, allowed := range s.config.AllowedOrigins {
+		if strings.EqualFold(origin, allowed) {
+			return true
+		}
 	}
 	originURL, err := url.Parse(origin)
 	if err != nil {
@@ -1482,6 +1598,26 @@ func isPrivateHost(host string) bool {
 		return false
 	}
 	return ip.IsPrivate() || ip.IsLoopback()
+}
+
+func hashSecret(secret string) string {
+	trimmed := strings.TrimSpace(secret)
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func verifySecret(hash string, secret string) bool {
+	if hash == "" {
+		return true
+	}
+	candidate := hashSecret(secret)
+	if candidate == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(hash), []byte(candidate)) == 1
 }
 
 func mustJSON(v interface{}) json.RawMessage {

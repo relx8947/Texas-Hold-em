@@ -4,6 +4,7 @@ import type {
   ChatPayload,
   CreateRoomPayload,
   JoinRoomPayload,
+  LoginPayload,
   PlayerActionPayload,
   PlayerProfile,
   RoomSummary,
@@ -14,6 +15,7 @@ import type {
 } from './protocol'
 
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
+type AuthState = 'anonymous' | 'authenticating' | 'authenticated'
 
 function storageKey(roomCode: string) {
   return `playerId:${roomCode.toUpperCase()}`
@@ -49,6 +51,7 @@ export function usePokerClient() {
   )
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected')
+  const [authState, setAuthState] = useState<AuthState>('anonymous')
   const [rooms, setRooms] = useState<RoomSummary[]>([])
   const [state, setState] = useState<StatePayload | null>(null)
   const [chat, setChat] = useState<ChatMessage[]>([])
@@ -86,6 +89,14 @@ export function usePokerClient() {
           storeProfile(payload)
           return
         }
+        case 'login_ok': {
+          const payload = msg.payload as PlayerProfile
+          setAuthState('authenticated')
+          setProfile(payload)
+          storeProfile(payload)
+          log(`已登录：${payload.name}`)
+          return
+        }
         case 'state': {
           const payload = msg.payload as StatePayload
           setState(payload)
@@ -112,6 +123,7 @@ export function usePokerClient() {
         }
         case 'error': {
           const payload = msg.payload as { message: string }
+          setAuthState((current) => current === 'authenticating' ? 'anonymous' : current)
           log(`错误：${payload.message}`)
           return
         }
@@ -120,6 +132,7 @@ export function usePokerClient() {
           log(payload.message)
           setState(null)
           setChat([])
+          setShowdown(null)
           return
         }
         case 'room_dissolved': {
@@ -127,6 +140,7 @@ export function usePokerClient() {
           log(payload.message)
           setState(null)
           setChat([])
+          setShowdown(null)
           return
         }
         default: {
@@ -161,10 +175,12 @@ export function usePokerClient() {
       }
       ws.onerror = () => {
         setConnectionState('error')
+        setAuthState('anonymous')
         reject(new Error('ws error'))
       }
       ws.onclose = () => {
         setConnectionState('disconnected')
+        setAuthState('anonymous')
         log('连接已断开')
       }
       ws.onmessage = (event) => {
@@ -202,6 +218,10 @@ export function usePokerClient() {
   const api = useMemo(() => {
     return {
       send,
+      login: (payload: LoginPayload) => {
+        setAuthState('authenticating')
+        send('login', payload)
+      },
       getProfile: (payload: { playerId: string; name: string }) => send('get_profile', payload),
       updateProfile: (payload: { playerId: string; name: string }) => send('update_profile', payload),
       listRooms: () => send('list_rooms', {}),
@@ -223,6 +243,7 @@ export function usePokerClient() {
     serverUrl,
     setServerUrl,
     connectionState,
+    authState,
     rooms,
     state,
     chat,

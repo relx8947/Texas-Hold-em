@@ -124,7 +124,8 @@ button {
 }
 
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+input[type="password"] {
   background: #fffdf6;
   border: 2px solid #f0d59a;
   border-radius: 12px;
