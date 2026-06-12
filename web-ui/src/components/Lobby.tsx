@@ -50,7 +50,7 @@ export function Lobby({
             <input
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder={`ws://${location.hostname}:8080/ws`}
+              placeholder={`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`}
             />
           </label>
           <label className="field">

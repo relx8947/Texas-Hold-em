@@ -17,11 +17,24 @@ import type {
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 type AuthState = 'anonymous' | 'authenticating' | 'authenticated'
 
+type RoomSession = {
+  roomCode: string
+  roomPassword: string
+  buyIn: number
+}
+
+const queueableMessageTypes = new Set(['login', 'create_room', 'join_room', 'list_rooms'])
+
 function storageKey(roomCode: string) {
   return `playerId:${roomCode.toUpperCase()}`
 }
 
 const profileStorageKey = 'playerProfileId'
+
+function defaultServerUrl() {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${location.host}/ws`
+}
 
 export function getStoredPlayerId(roomCode: string) {
   return localStorage.getItem(storageKey(roomCode)) ?? ''
@@ -44,11 +57,16 @@ function storeProfile(profile: PlayerProfile) {
 
 export function usePokerClient() {
   const wsRef = useRef<WebSocket | null>(null)
-  const pendingRef = useRef<WSMessage | null>(null)
+  const pendingRef = useRef<WSMessage[]>([])
+  const loginRef = useRef<LoginPayload | null>(null)
+  const roomSessionRef = useRef<RoomSession | null>(null)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const manualCloseRef = useRef(false)
+  const restoringRef = useRef(false)
+  const connectRef = useRef<(() => Promise<void>) | null>(null)
 
-  const [serverUrl, setServerUrl] = useState<string>(
-    `ws://${location.hostname}:8080/ws`,
-  )
+  const [serverUrl, setServerUrl] = useState<string>(defaultServerUrl)
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected')
   const [authState, setAuthState] = useState<AuthState>('anonymous')
@@ -63,6 +81,12 @@ export function usePokerClient() {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev])
   }, [])
 
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current === null) return
+    window.clearTimeout(reconnectTimerRef.current)
+    reconnectTimerRef.current = null
+  }, [])
+
   const handleMessage = useCallback(
     (msg: WSMessage) => {
       switch (msg.type) {
@@ -74,12 +98,22 @@ export function usePokerClient() {
         case 'room_created': {
           const payload = msg.payload as { roomCode: string; playerId: string }
           storePlayerId(payload.roomCode, payload.playerId)
+          roomSessionRef.current = {
+            roomCode: payload.roomCode,
+            roomPassword: roomSessionRef.current?.roomPassword ?? '',
+            buyIn: roomSessionRef.current?.buyIn ?? 0,
+          }
           log(`房间创建成功：${payload.roomCode}`)
           return
         }
         case 'room_joined': {
           const payload = msg.payload as { roomCode: string; playerId: string }
           storePlayerId(payload.roomCode, payload.playerId)
+          roomSessionRef.current = {
+            roomCode: payload.roomCode,
+            roomPassword: roomSessionRef.current?.roomPassword ?? '',
+            buyIn: roomSessionRef.current?.buyIn ?? 0,
+          }
           log(`加入房间：${payload.roomCode}`)
           return
         }
@@ -95,6 +129,29 @@ export function usePokerClient() {
           setProfile(payload)
           storeProfile(payload)
           log(`已登录：${payload.name}`)
+          if (restoringRef.current) {
+            const roomSession = roomSessionRef.current
+            if (roomSession?.roomCode) {
+              const rejoinMessage: WSMessage = {
+                type: 'join_room',
+                payload: {
+                  playerName: payload.name,
+                  roomCode: roomSession.roomCode,
+                  playerId: getStoredPlayerId(roomSession.roomCode),
+                  profileId: payload.id,
+                  roomPassword: roomSession.roomPassword,
+                  buyIn: roomSession.buyIn,
+                },
+              }
+              const ws = wsRef.current
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(rejoinMessage))
+              } else {
+                pendingRef.current.push(rejoinMessage)
+              }
+            }
+            restoringRef.current = false
+          }
           return
         }
         case 'state': {
@@ -125,6 +182,14 @@ export function usePokerClient() {
           const payload = msg.payload as { message: string }
           setAuthState((current) => current === 'authenticating' ? 'anonymous' : current)
           log(`错误：${payload.message}`)
+          if (restoringRef.current || payload.message === '房间不存在') {
+            restoringRef.current = false
+            roomSessionRef.current = null
+            setState(null)
+            setChat([])
+            setShowdown(null)
+            log('房间已失效，可能是服务重启或房间已解散；剩余筹码会在服务端结算回资料余额。')
+          }
           return
         }
         case 'kicked': {
@@ -133,6 +198,7 @@ export function usePokerClient() {
           setState(null)
           setChat([])
           setShowdown(null)
+          roomSessionRef.current = null
           return
         }
         case 'room_dissolved': {
@@ -141,6 +207,7 @@ export function usePokerClient() {
           setState(null)
           setChat([])
           setShowdown(null)
+          roomSessionRef.current = null
           return
         }
         default: {
@@ -151,6 +218,19 @@ export function usePokerClient() {
     [log],
   )
 
+  const scheduleReconnect = useCallback(() => {
+    if (manualCloseRef.current || reconnectTimerRef.current !== null) return
+    const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 8000)
+    reconnectAttemptsRef.current += 1
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null
+      restoringRef.current = loginRef.current !== null
+      connectRef.current?.().catch(() => {
+        log('自动重连失败，稍后重试')
+      })
+    }, delay)
+  }, [log])
+
   const connect = useCallback(async () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       return
@@ -160,17 +240,23 @@ export function usePokerClient() {
     }
 
     setConnectionState('connecting')
+    manualCloseRef.current = false
     const ws = new WebSocket(serverUrl)
     wsRef.current = ws
 
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => {
         setConnectionState('connected')
+        reconnectAttemptsRef.current = 0
+        clearReconnectTimer()
         log('已连接服务器')
         resolve()
-        if (pendingRef.current) {
-          ws.send(JSON.stringify(pendingRef.current))
-          pendingRef.current = null
+        if (restoringRef.current && loginRef.current) {
+          pendingRef.current.unshift({ type: 'login', payload: loginRef.current })
+        }
+        const pending = pendingRef.current.splice(0)
+        for (const message of pending) {
+          ws.send(JSON.stringify(message))
         }
       }
       ws.onerror = () => {
@@ -180,7 +266,12 @@ export function usePokerClient() {
       }
       ws.onclose = () => {
         setConnectionState('disconnected')
-        setAuthState('anonymous')
+        if (loginRef.current) {
+          setAuthState('authenticating')
+          scheduleReconnect()
+        } else {
+          setAuthState('anonymous')
+        }
         log('连接已断开')
       }
       ws.onmessage = (event) => {
@@ -192,14 +283,23 @@ export function usePokerClient() {
         }
       }
     })
-  }, [handleMessage, log, serverUrl])
+  }, [clearReconnectTimer, handleMessage, log, scheduleReconnect, serverUrl])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   const send = useCallback(
     (type: string, payload: unknown) => {
       const ws = wsRef.current
       const msg: WSMessage = { type, payload }
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        pendingRef.current = msg
+        if (!queueableMessageTypes.has(type)) {
+          log('连接未恢复，操作未发送')
+          connect().catch(() => log('无法连接服务器'))
+          return
+        }
+        pendingRef.current.push(msg)
         connect().catch(() => log('无法连接服务器'))
         return
       }
@@ -210,23 +310,40 @@ export function usePokerClient() {
 
   useEffect(() => {
     return () => {
+      manualCloseRef.current = true
+      clearReconnectTimer()
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [])
+  }, [clearReconnectTimer])
 
   const api = useMemo(() => {
     return {
       send,
       login: (payload: LoginPayload) => {
+        loginRef.current = payload
         setAuthState('authenticating')
         send('login', payload)
       },
       getProfile: (payload: { playerId: string; name: string }) => send('get_profile', payload),
       updateProfile: (payload: { playerId: string; name: string }) => send('update_profile', payload),
       listRooms: () => send('list_rooms', {}),
-      createRoom: (payload: CreateRoomPayload) => send('create_room', payload),
-      joinRoom: (payload: JoinRoomPayload) => send('join_room', payload),
+      createRoom: (payload: CreateRoomPayload) => {
+        roomSessionRef.current = {
+          roomCode: '',
+          roomPassword: payload.roomPassword,
+          buyIn: payload.buyIn,
+        }
+        send('create_room', payload)
+      },
+      joinRoom: (payload: JoinRoomPayload) => {
+        roomSessionRef.current = {
+          roomCode: payload.roomCode,
+          roomPassword: payload.roomPassword,
+          buyIn: payload.buyIn,
+        }
+        send('join_room', payload)
+      },
       startGame: () => send('start_game', {}),
       action: (payload: PlayerActionPayload) => send('action', payload),
       topUp: (payload: TopUpPayload) => send('top_up', payload),
@@ -234,7 +351,10 @@ export function usePokerClient() {
       sitIn: () => send('sit_in', {}),
       kickPlayer: (playerId: string) => send('kick_player', { playerId }),
       dissolveRoom: () => send('dissolve_room', {}),
-      leaveRoom: () => send('leave_room', {}),
+      leaveRoom: () => {
+        roomSessionRef.current = null
+        send('leave_room', {})
+      },
       chat: (payload: ChatPayload) => send('chat', payload),
     }
   }, [send])
