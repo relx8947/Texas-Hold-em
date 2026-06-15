@@ -1,11 +1,11 @@
-FROM node:24-alpine AS web-build
+FROM node:22-alpine AS web-build
 WORKDIR /app/web-ui
 COPY web-ui/package*.json ./
 RUN npm ci
 COPY web-ui/ ./
 RUN npm run build
 
-FROM golang:1.21-alpine AS server-build
+FROM golang:1.25-alpine AS server-build
 WORKDIR /app/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download

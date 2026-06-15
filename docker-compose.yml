@@ -8,6 +8,7 @@ services:
       DATA_PATH: "/data/data.db"
       STATIC_DIR: "/app/web"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
+      NEXT_HAND_DELAY_SECONDS: "${NEXT_HAND_DELAY_SECONDS:-6}"
     volumes:
       - texas_holdem_data:/data
     restart: unless-stopped

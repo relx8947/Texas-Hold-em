@@ -7,6 +7,10 @@ server/data.db*
 server/texas-holdem-lan
 web-ui/node_modules
 web-ui/dist
+web/
 *.log
+*.md
+.DS_Store
+**/.DS_Store
 .env
 .env.local
