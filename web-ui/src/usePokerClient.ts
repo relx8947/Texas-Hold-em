@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   ChatPayload,
   CreateRoomPayload,
+  HandHistoryEntry,
   JoinRoomPayload,
   LoginPayload,
   PlayerActionPayload,
@@ -90,6 +91,7 @@ export function usePokerClient() {
   const [logs, setLogs] = useState<string[]>([])
   const [showdown, setShowdown] = useState<ShowdownPayload | null>(null)
   const [profile, setProfile] = useState<PlayerProfile | null>(null)
+  const [history, setHistory] = useState<HandHistoryEntry[]>([])
   const [toast, setToast] = useState<{ id: number; kind: 'error' | 'info'; message: string } | null>(null)
 
   const notify = useCallback((kind: 'error' | 'info', message: string) => {
@@ -202,6 +204,11 @@ export function usePokerClient() {
         }
         case 'showdown': {
           setShowdown(msg.payload as ShowdownPayload)
+          return
+        }
+        case 'hand_history': {
+          const payload = msg.payload as { history?: HandHistoryEntry[] }
+          setHistory(Array.isArray(payload?.history) ? payload.history : [])
           return
         }
         case 'info': {
@@ -390,6 +397,8 @@ export function usePokerClient() {
       topUp: (payload: TopUpPayload) => send('top_up', payload),
       sitOut: () => send('sit_out', {}),
       sitIn: () => send('sit_in', {}),
+      toggleReady: () => send('ready', {}),
+      getHistory: () => send('get_history', {}),
       kickPlayer: (playerId: string) => send('kick_player', { playerId }),
       dissolveRoom: () => send('dissolve_room', {}),
       leaveRoom: () => {
@@ -411,6 +420,7 @@ export function usePokerClient() {
     logs,
     showdown,
     profile,
+    history,
     toast,
     dismissToast: () => setToast(null),
     connect,

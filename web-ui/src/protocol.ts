@@ -11,6 +11,8 @@ export type CreateRoomPayload = {
   roomPassword: string
   maxPlayers: number
   buyIn: number
+  tournament: boolean
+  blindIncreaseEvery: number
 }
 
 export type JoinRoomPayload = {
@@ -20,6 +22,7 @@ export type JoinRoomPayload = {
   profileId: string
   roomPassword: string
   buyIn: number
+  asSpectator?: boolean
 }
 
 export type LoginPayload = {
@@ -62,6 +65,7 @@ export type PublicPlayer = {
   folded: boolean
   allIn: boolean
   sittingOut: boolean
+  ready: boolean
   dealer: boolean
   current: boolean
   connected: boolean
@@ -79,6 +83,14 @@ export type PrivatePlayer = {
   folded: boolean
   allIn: boolean
   sittingOut: boolean
+  ready: boolean
+  spectator: boolean
+}
+
+export type Spectator = {
+  id: string
+  name: string
+  avatarSeed: string
 }
 
 export type StatePayload = {
@@ -99,6 +111,10 @@ export type StatePayload = {
   actionDeadline: number
   serverTime: number
   lastEvent?: LastEvent | null
+  tournament: boolean
+  blindLevel: number
+  handsToBlindUp: number
+  spectators: Spectator[]
 }
 
 export type LastEvent = {
@@ -148,4 +164,17 @@ export type PlayerProfile = {
   chips: number
   handsPlayed: number
   handsWon: number
+  netProfit: number
+}
+
+export type HandHistoryEntry = {
+  handId: number
+  roomCode: string
+  stage: string
+  net: number
+  won: boolean
+  community: string
+  hole: string
+  rank: string
+  time: number
 }
