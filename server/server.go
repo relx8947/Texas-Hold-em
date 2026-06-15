@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -29,7 +31,10 @@ const (
 var (
 	actionTimeout     = 30 * time.Second
 	disconnectTimeout = 5 * time.Minute
+	nextHandDelay     = 6 * time.Second
 )
+
+var errRoomNotFound = errors.New("房间不存在")
 
 func init() {
 	if v := os.Getenv("ACTION_TIMEOUT_SECONDS"); v != "" {
@@ -40,6 +45,11 @@ func init() {
 	if v := os.Getenv("DISCONNECT_TIMEOUT_MINUTES"); v != "" {
 		if minutes, err := strconv.Atoi(v); err == nil && minutes > 0 {
 			disconnectTimeout = time.Duration(minutes) * time.Minute
+		}
+	}
+	if v := os.Getenv("NEXT_HAND_DELAY_SECONDS"); v != "" {
+		if seconds, err := strconv.Atoi(v); err == nil && seconds >= 0 {
+			nextHandDelay = time.Duration(seconds) * time.Second
 		}
 	}
 }
@@ -68,7 +78,17 @@ type Room struct {
 	StateSeq       int64
 	HandID         int64
 	LastEvent      *LastEvent
-	mu             sync.Mutex
+	pendingMsgs        []WSMessage
+	pendingSettlements []chipCredit
+	nextHandTimer      *time.Timer
+	AutoContinue       bool
+	lastPersistKey     string
+	mu                 sync.Mutex
+}
+
+type chipCredit struct {
+	profileID string
+	amount    int
 }
 
 type Player struct {
@@ -120,6 +140,7 @@ type JoinRoomPayload struct {
 
 type LoginPayload struct {
 	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 type KickPayload struct {
@@ -378,8 +399,19 @@ func (s *Server) settleStoredPlayerRecord(player PlayerRecord) error {
 	if s.storage == nil || player.Chips <= 0 {
 		return nil
 	}
-	_, err := s.storage.AdjustProfileChips(firstNonEmpty(player.ProfileID, player.ID), player.Chips)
-	return err
+	profileID := strings.TrimSpace(player.ProfileID)
+	if profileID == "" {
+		// No profile binding: cannot safely credit chips back; log and skip
+		// instead of silently crediting a non-profile player ID (which updates
+		// zero rows and loses the chips).
+		log.Printf("skip chip recovery for player %s: missing profile id (%d chips)", player.ID, player.Chips)
+		return nil
+	}
+	if _, err := s.storage.AdjustProfileChips(profileID, player.Chips); err != nil {
+		log.Printf("chip recovery failed for profile %s: %v", profileID, err)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) startConnHeartbeat(conn *websocket.Conn) func() {
@@ -417,6 +449,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(s.config.WSReadLimit)
 	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("recovered panic in handleWS: %v", rec)
+		}
 		_ = conn.Close()
 		connWriteLocks.Delete(conn)
 		connWriteTimeouts.Delete(conn)
@@ -533,7 +568,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			payload.ProfileID = sessionProfile.ID
 			room, player, err = s.joinRoom(payload, conn)
 			if err != nil {
-				writeError(conn, err.Error())
+				if errors.Is(err, errRoomNotFound) {
+					writeErrorCode(conn, err.Error(), "room_not_found")
+				} else {
+					writeError(conn, err.Error())
+				}
 				continue
 			}
 			room.broadcastState()
@@ -544,21 +583,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			room.mu.Lock()
-			if room.HostID != player.ID {
-				room.mu.Unlock()
+			isHost := room.HostID == player.ID
+			room.mu.Unlock()
+			if !isHost {
 				writeError(conn, "只有房主可以开始")
 				continue
 			}
-			if room.Game.Stage != "waiting" {
-				room.mu.Unlock()
-				writeError(conn, "牌局已经开始")
-				continue
-			}
-			err := room.Game.StartHand()
-			if err == nil {
-				room.resetActionTimerLocked()
-			}
-			room.mu.Unlock()
+			err := room.startHandLocked()
+			room.flushPendingMessages()
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
@@ -574,12 +606,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "参数错误")
 				continue
 			}
-			room.mu.Lock()
-			err := room.Game.ApplyAction(player.ID, payload)
-			if err == nil {
-				room.resetActionTimerLocked()
-			}
-			room.mu.Unlock()
+			err := room.applyActionLocked(player.ID, payload)
+			room.flushPendingMessages()
 			if err != nil {
 				writeError(conn, err.Error())
 				continue
@@ -640,6 +668,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				writeError(conn, "补码金额无效")
 				continue
 			}
+			if payload.Amount > maxBuyIn {
+				writeError(conn, fmt.Sprintf("单次补码不能超过%d", maxBuyIn))
+				continue
+			}
 			_, err := s.ensureProfile(player.ProfileID, player.Name)
 			if err != nil {
 				writeError(conn, err.Error())
@@ -669,6 +701,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				room.resetActionTimerLocked()
 			}
 			room.mu.Unlock()
+			room.flushPendingMessages()
 			room.broadcastState()
 		case "sit_in":
 			if room == nil || player == nil {
@@ -694,7 +727,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if room != nil && player != nil {
-		room.handleDisconnect(player.ID)
+		room.handleDisconnect(player.ID, conn)
 	}
 }
 
@@ -723,6 +756,7 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 		PasswordHash: hashSecret(payload.RoomPassword),
 		Seats:        make([]*Player, maxPlayers),
 		CreatedAt:    time.Now(),
+		AutoContinue: true,
 	}
 	room.Game = NewGame(room)
 	player := room.addPlayerLocked(randomID(), profile.ID, profile.Name, profile.AvatarSeed, conn, buyIn)
@@ -751,7 +785,7 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 	room := s.rooms[code]
 	s.mu.Unlock()
 	if room == nil {
-		return nil, nil, errors.New("房间不存在")
+		return nil, nil, errRoomNotFound
 	}
 	if !verifySecret(room.PasswordHash, payload.RoomPassword) {
 		return nil, nil, errors.New("房间密码错误")
@@ -779,6 +813,7 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 			if p.DisconnectedAt != nil && time.Since(*p.DisconnectedAt) > disconnectTimeout {
 				return nil, nil, errors.New("断线已超时，请重新加入")
 			}
+			oldConn := p.Conn
 			p.Conn = conn
 			p.Connected = true
 			p.ProfileID = profile.ID
@@ -789,6 +824,9 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 				p.disconnectTimer = nil
 			}
 			p.DisconnectedAt = nil
+			if oldConn != nil && oldConn != conn {
+				_ = oldConn.Close()
+			}
 			if room.Server != nil && room.Server.storage != nil {
 				_ = room.Server.storage.UpsertPlayer(room.Code, buildPlayerSnapshot(p))
 			}
@@ -811,6 +849,7 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 			if p.DisconnectedAt != nil && time.Since(*p.DisconnectedAt) > disconnectTimeout {
 				return nil, nil, errors.New("断线已超时，请重新加入")
 			}
+			oldConn := p.Conn
 			p.Conn = conn
 			p.Connected = true
 			p.ProfileID = profile.ID
@@ -821,6 +860,9 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 				p.disconnectTimer = nil
 			}
 			p.DisconnectedAt = nil
+			if oldConn != nil && oldConn != conn {
+				_ = oldConn.Close()
+			}
 			if room.Server != nil && room.Server.storage != nil {
 				_ = room.Server.storage.UpsertPlayer(room.Code, buildPlayerSnapshot(p))
 			}
@@ -862,11 +904,16 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 	if username == "" {
 		return ProfileResponse{}, errors.New("请输入用户名")
 	}
+	password := payload.Password
+	if len(password) < 4 {
+		return ProfileResponse{}, errors.New("密码至少需要4位")
+	}
 	user, err := s.storage.LoadUser(username)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return ProfileResponse{}, err
 		}
+		// First login for this username: register a new account.
 		profiles, err := s.storage.FindProfilesByName(username)
 		if err != nil {
 			return ProfileResponse{}, err
@@ -887,10 +934,27 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 				return ProfileResponse{}, err
 			}
 		}
-		if _, err := s.storage.UpsertUser(username, "", profile.ID); err != nil {
+		passwordHash, err := hashPassword(password)
+		if err != nil {
+			return ProfileResponse{}, err
+		}
+		if _, err := s.storage.UpsertUser(username, passwordHash, profile.ID); err != nil {
 			return ProfileResponse{}, err
 		}
 		return profile, nil
+	}
+	// Existing account: verify the password.
+	if user.PasswordHash == "" {
+		// Legacy account created before passwords existed: bind this password now.
+		passwordHash, err := hashPassword(password)
+		if err != nil {
+			return ProfileResponse{}, err
+		}
+		if _, err := s.storage.UpsertUser(username, passwordHash, user.ProfileID); err != nil {
+			return ProfileResponse{}, err
+		}
+	} else if !verifyPassword(user.PasswordHash, password) {
+		return ProfileResponse{}, errors.New("用户名或密码错误")
 	}
 	profile, err := s.storage.LoadProfile(user.ProfileID)
 	if err != nil {
@@ -1054,7 +1118,12 @@ func (s *Server) dissolveRoom(room *Room, reason string) {
 		room.ActionTimer.Stop()
 		room.ActionTimer = nil
 	}
+	if room.nextHandTimer != nil {
+		room.nextHandTimer.Stop()
+		room.nextHandTimer = nil
+	}
 	room.mu.Unlock()
+	room.flushSettlements()
 
 	msg := WSMessage{Type: "room_dissolved", Payload: mustJSON(map[string]string{"message": reason})}
 	for _, p := range players {
@@ -1129,10 +1198,16 @@ func (r *Room) findPlayer(id string) (int, *Player) {
 	return -1, nil
 }
 
-func (r *Room) handleDisconnect(playerID string) {
+func (r *Room) handleDisconnect(playerID string, conn *websocket.Conn) {
 	r.mu.Lock()
 	_, player := r.findPlayerByIDLocked(playerID)
 	if player == nil {
+		r.mu.Unlock()
+		return
+	}
+	// If the player already reconnected on a new connection, this stale handler
+	// must not mark them disconnected.
+	if conn != nil && player.Conn != conn {
 		r.mu.Unlock()
 		return
 	}
@@ -1144,6 +1219,11 @@ func (r *Room) handleDisconnect(playerID string) {
 			player.disconnectTimer.Stop()
 		}
 		player.disconnectTimer = time.AfterFunc(disconnectTimeout, func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("recovered panic in handleDisconnectTimeout: %v", rec)
+				}
+			}()
 			r.handleDisconnectTimeout(player.ID)
 		})
 	}
@@ -1164,6 +1244,8 @@ func (r *Room) handleDisconnectTimeout(playerID string) {
 	}
 	removedNow := r.removePlayerLocked(playerID)
 	r.mu.Unlock()
+	r.flushPendingMessages()
+	r.flushSettlements()
 	r.broadcastInfo(fmt.Sprintf("%s 超时退出房间", player.Name))
 	r.broadcastState()
 	if removedNow {
@@ -1175,6 +1257,8 @@ func (r *Room) handleLeave(playerID string) {
 	r.mu.Lock()
 	removedNow := r.removePlayerLocked(playerID)
 	r.mu.Unlock()
+	r.flushPendingMessages()
+	r.flushSettlements()
 	r.broadcastState()
 	if removedNow {
 		r.removeRoomIfEmpty()
@@ -1230,11 +1314,29 @@ func (r *Room) settlePlayerBankrollLocked(player *Player) {
 	if player == nil || player.BankrollSettled {
 		return
 	}
-	if player.Chips > 0 && r.Server != nil {
-		_, _ = r.Server.adjustProfileChips(player.ProfileID, player.Chips)
+	if player.Chips > 0 && player.ProfileID != "" {
+		// Defer the DB write: queue the credit and apply it after the room lock
+		// is released (see flushSettlements) to avoid blocking the room on I/O.
+		r.pendingSettlements = append(r.pendingSettlements, chipCredit{profileID: player.ProfileID, amount: player.Chips})
 	}
 	player.Chips = 0
 	player.BankrollSettled = true
+}
+
+// flushSettlements applies queued chip credits to profiles outside the room lock.
+func (r *Room) flushSettlements() {
+	r.mu.Lock()
+	credits := r.pendingSettlements
+	r.pendingSettlements = nil
+	r.mu.Unlock()
+	if r.Server == nil {
+		return
+	}
+	for _, c := range credits {
+		if _, err := r.Server.adjustProfileChips(c.profileID, c.amount); err != nil {
+			log.Printf("settlement credit failed for profile %s: %v", c.profileID, err)
+		}
+	}
 }
 
 func (r *Room) ensureHostLocked() {
@@ -1261,6 +1363,113 @@ func (r *Room) onHandEndedLocked() {
 		r.ActionTimer.Stop()
 		r.ActionTimer = nil
 	}
+	r.scheduleNextHandLocked()
+}
+
+// queueMessageLocked stores a broadcast message produced while holding r.mu so
+// it can be flushed (sent over the network) after the lock is released.
+func (r *Room) queueMessageLocked(msg WSMessage) {
+	r.pendingMsgs = append(r.pendingMsgs, msg)
+}
+
+func (r *Room) queueInfoLocked(message string) {
+	r.queueMessageLocked(WSMessage{Type: "info", Payload: mustJSON(map[string]string{"message": message})})
+}
+
+// flushPendingMessages sends and clears any messages queued under the lock, and
+// applies any chip settlements queued under the lock.
+func (r *Room) flushPendingMessages() {
+	r.mu.Lock()
+	msgs := r.pendingMsgs
+	r.pendingMsgs = nil
+	recipients := make([]*Player, 0, len(r.Seats))
+	for _, p := range r.Seats {
+		if p != nil && p.Conn != nil {
+			recipients = append(recipients, p)
+		}
+	}
+	r.mu.Unlock()
+	for _, msg := range msgs {
+		for _, p := range recipients {
+			_ = p.send(msg)
+		}
+	}
+	r.flushSettlements()
+}
+
+// scheduleNextHandLocked auto-starts the next hand a few seconds after a hand
+// ends, so the host does not have to click "start" every round.
+func (r *Room) scheduleNextHandLocked() {
+	if r.nextHandTimer != nil {
+		r.nextHandTimer.Stop()
+		r.nextHandTimer = nil
+	}
+	if !r.AutoContinue {
+		return
+	}
+	if r.Game == nil || r.Game.Stage != "waiting" {
+		return
+	}
+	if r.Game.countEligiblePlayers() < 2 {
+		return
+	}
+	r.nextHandTimer = time.AfterFunc(nextHandDelay, func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("recovered panic in startNextHand: %v", rec)
+			}
+		}()
+		r.startNextHand()
+	})
+}
+
+func (r *Room) startNextHand() {
+	r.mu.Lock()
+	if r.Game == nil || r.Game.Stage != "waiting" {
+		r.mu.Unlock()
+		return
+	}
+	if r.Game.countEligiblePlayers() < 2 {
+		r.mu.Unlock()
+		return
+	}
+	err := r.Game.StartHand()
+	if err == nil {
+		r.resetActionTimerLocked()
+	}
+	r.mu.Unlock()
+	r.flushPendingMessages()
+	if err == nil {
+		r.broadcastState()
+	}
+}
+
+// applyActionLocked runs a game mutation under the room lock with a deferred
+// unlock so a panic cannot leave the room mutex permanently held.
+func (r *Room) applyActionLocked(playerID string, action PlayerAction) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	err := r.Game.ApplyAction(playerID, action)
+	if err == nil {
+		r.resetActionTimerLocked()
+	}
+	return err
+}
+
+func (r *Room) startHandLocked() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.HostID == "" {
+		return errors.New("没有房主")
+	}
+	if r.Game.Stage != "waiting" {
+		return errors.New("牌局已经开始")
+	}
+	err := r.Game.StartHand()
+	if err == nil {
+		r.resetActionTimerLocked()
+	}
+	return err
 }
 
 func (r *Room) removeRoomIfEmpty() {
@@ -1278,6 +1487,10 @@ func (r *Room) removeRoomIfEmpty() {
 	if empty && r.ActionTimer != nil {
 		r.ActionTimer.Stop()
 		r.ActionTimer = nil
+	}
+	if empty && r.nextHandTimer != nil {
+		r.nextHandTimer.Stop()
+		r.nextHandTimer = nil
 	}
 	r.mu.Unlock()
 	if empty {
@@ -1311,6 +1524,11 @@ func (r *Room) resetActionTimerLocked() {
 	token := r.actionToken
 	r.ActionDeadline = time.Now().Add(actionTimeout)
 	r.ActionTimer = time.AfterFunc(actionTimeout, func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("recovered panic in handleActionTimeout: %v", rec)
+			}
+		}()
 		r.handleActionTimeout(token, idx)
 	})
 }
@@ -1330,9 +1548,12 @@ func (r *Room) handleActionTimeout(token int64, seat int) {
 		r.mu.Unlock()
 		return
 	}
-	_ = r.Game.ApplyAction(player.ID, PlayerAction{Action: "fold"})
-	r.resetActionTimerLocked()
-	r.mu.Unlock()
+	func() {
+		defer r.mu.Unlock()
+		_ = r.Game.ApplyAction(player.ID, PlayerAction{Action: "fold"})
+		r.resetActionTimerLocked()
+	}()
+	r.flushPendingMessages()
 	r.broadcastInfo(fmt.Sprintf("%s 超时自动弃牌", player.Name))
 	r.broadcastState()
 }
@@ -1355,6 +1576,8 @@ func (r *Room) kickPlayer(requesterID string, targetID string) error {
 	removedNow := r.removePlayerLocked(targetID)
 	conn := target.Conn
 	r.mu.Unlock()
+	r.flushPendingMessages()
+	r.flushSettlements()
 
 	if conn != nil {
 		_ = target.send(WSMessage{Type: "kicked", Payload: mustJSON(map[string]string{"message": "你被房主移除"})})
@@ -1371,6 +1594,9 @@ func (r *Room) addChatMessage(player *Player, message string) {
 	text := strings.TrimSpace(message)
 	if text == "" {
 		return
+	}
+	if runes := []rune(text); len(runes) > 300 {
+		text = string(runes[:300])
 	}
 	msg := ChatMessage{
 		PlayerID: player.ID,
@@ -1436,7 +1662,11 @@ func (r *Room) broadcastState() {
 	}
 	actionDeadline := r.ActionDeadline
 	serverTime := time.Now().UnixMilli()
-	states := make([]WSMessage, 0, len(players))
+	type outbound struct {
+		player *Player
+		msg    WSMessage
+	}
+	outbounds := make([]outbound, 0, len(players))
 	playerSnapshots := make([]PlayerSnapshot, 0, len(players))
 	for _, p := range players {
 		if p == nil {
@@ -1446,23 +1676,22 @@ func (r *Room) broadcastState() {
 			continue
 		}
 		state := r.buildStateForSnapshot(p, snapshot, players, actionDeadline, serverTime, stateSeq, handID, lastEvent)
-		states = append(states, state)
+		outbounds = append(outbounds, outbound{player: p, msg: state})
 		playerSnapshots = append(playerSnapshots, buildPlayerSnapshot(p))
 	}
+	// Throttle persistence: only write when the hand or roster changes, not on
+	// every in-hand action broadcast.
+	rosterKey := fmt.Sprintf("%d:%s:%s:%d", handID, snapshot.Stage, r.HostID, len(playerSnapshots))
+	shouldPersist := rosterKey != r.lastPersistKey
+	r.lastPersistKey = rosterKey
 	r.mu.Unlock()
 
-	idx := 0
-	for _, p := range players {
-		if p == nil {
-			continue
-		}
-		if p.BankrollSettled {
-			continue
-		}
-		_ = p.send(states[idx])
-		idx++
+	for _, ob := range outbounds {
+		_ = ob.player.send(ob.msg)
 	}
-	r.persistSnapshots(roomSnapshot, playerSnapshots)
+	if shouldPersist {
+		r.persistSnapshots(roomSnapshot, playerSnapshots)
+	}
 	r.removeRoomIfEmpty()
 }
 
@@ -1642,9 +1871,17 @@ func connWriteTimeout(conn *websocket.Conn) time.Duration {
 }
 
 func writeError(conn *websocket.Conn, message string) {
+	writeErrorCode(conn, message, "")
+}
+
+func writeErrorCode(conn *websocket.Conn, message string, code string) {
+	payload := map[string]string{"message": message}
+	if code != "" {
+		payload["code"] = code
+	}
 	writeJSON(conn, WSMessage{
 		Type:    "error",
-		Payload: mustJSON(map[string]string{"message": message}),
+		Payload: mustJSON(payload),
 	})
 }
 
@@ -1670,10 +1907,16 @@ func (s *Server) isAllowedWSOrigin(r *http.Request) bool {
 	if err != nil {
 		requestHost = r.Host
 	}
-	if strings.EqualFold(originHost, requestHost) || isLoopbackHost(originHost) || isPrivateHost(originHost) {
+	if strings.EqualFold(originHost, requestHost) {
 		return true
 	}
-	return false
+	// When an explicit allow-list is configured, enforce it strictly and do not
+	// blanket-allow loopback/private origins (which would let any LAN page open
+	// a cross-site WebSocket). The allow-list is the source of truth.
+	if len(s.config.AllowedOrigins) > 0 {
+		return false
+	}
+	return isLoopbackHost(originHost) || isPrivateHost(originHost)
 }
 
 func isLoopbackHost(host string) bool {
@@ -1689,6 +1932,8 @@ func isPrivateHost(host string) bool {
 	return ip.IsPrivate() || ip.IsLoopback()
 }
 
+// hashSecret hashes a room password with SHA-256. Room passwords are low-value,
+// shared, short-lived secrets; for user account passwords use hashPassword.
 func hashSecret(secret string) string {
 	trimmed := strings.TrimSpace(secret)
 	if trimmed == "" {
@@ -1709,8 +1954,29 @@ func verifySecret(hash string, secret string) bool {
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(candidate)) == 1
 }
 
+// hashPassword hashes an account password with bcrypt.
+func hashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+// verifyPassword reports whether password matches the stored bcrypt hash.
+func verifyPassword(hash string, password string) bool {
+	if hash == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
 func mustJSON(v interface{}) json.RawMessage {
-	data, _ := json.Marshal(v)
+	data, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("mustJSON marshal error: %v", err)
+		return json.RawMessage("null")
+	}
 	return data
 }
 
@@ -1780,9 +2046,14 @@ func sanitizeMaxPlayers(n int) int {
 	return n
 }
 
+const maxBuyIn = 1000000
+
 func sanitizeBuyIn(n int) int {
 	if n <= 0 {
 		return startingChips
+	}
+	if n > maxBuyIn {
+		return maxBuyIn
 	}
 	return n
 }
