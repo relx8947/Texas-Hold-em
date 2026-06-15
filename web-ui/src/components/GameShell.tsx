@@ -56,7 +56,7 @@ function SettlementPanel({ showdown, onClose }: { showdown: ShowdownPayload; onC
 }
 
 export function GameShell() {
-  const { serverUrl, setServerUrl, connectionState, authState, state, rooms, logs, showdown, profile, connect, api } = usePokerClient()
+  const { serverUrl, setServerUrl, connectionState, authState, state, rooms, logs, showdown, profile, toast, dismissToast, connect, api } = usePokerClient()
   const profileMenuRef = useRef<HTMLDivElement | null>(null)
   const [overlayOpen, setOverlayOpen] = useState(true)
   const [mode, setMode] = useState<OverlayMode>('create')
@@ -121,6 +121,12 @@ export function GameShell() {
     window.addEventListener('pointerdown', handlePointerDown)
     return () => window.removeEventListener('pointerdown', handlePointerDown)
   }, [profileOpen])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = window.setTimeout(() => dismissToast(), 3200)
+    return () => window.clearTimeout(t)
+  }, [toast, dismissToast])
 
   const canSubmit = playerName.trim().length > 0
   const isAuthed = authState === 'authenticated'
@@ -483,6 +489,12 @@ export function GameShell() {
           </div>
         </aside>
       </div>
+
+      {toast ? (
+        <div className={`appToast ${toast.kind}`} role="status" onClick={() => dismissToast()}>
+          {toast.message}
+        </div>
+      ) : null}
 
       {showdown && showSettlement ? <SettlementPanel showdown={showdown} onClose={() => setShowSettlement(false)} /> : null}
 

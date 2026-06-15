@@ -90,6 +90,11 @@ export function usePokerClient() {
   const [logs, setLogs] = useState<string[]>([])
   const [showdown, setShowdown] = useState<ShowdownPayload | null>(null)
   const [profile, setProfile] = useState<PlayerProfile | null>(null)
+  const [toast, setToast] = useState<{ id: number; kind: 'error' | 'info'; message: string } | null>(null)
+
+  const notify = useCallback((kind: 'error' | 'info', message: string) => {
+    setToast({ id: Date.now() + Math.random(), kind, message })
+  }, [])
 
   const log = useCallback((message: string) => {
     setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev])
@@ -202,12 +207,14 @@ export function usePokerClient() {
         case 'info': {
           const payload = msg.payload as { message: string }
           log(payload.message)
+          notify('info', payload.message)
           return
         }
         case 'error': {
           const payload = msg.payload as { message: string; code?: string }
           setAuthState((current) => current === 'authenticating' ? 'anonymous' : current)
           log(`错误：${payload.message}`)
+          notify('error', payload.message)
           // Prefer the structured code; fall back to the legacy message text.
           const roomGone = payload.code === 'room_not_found' || payload.message === '房间不存在'
           if (restoringRef.current || roomGone) {
@@ -243,7 +250,7 @@ export function usePokerClient() {
         }
       }
     },
-    [log],
+    [log, notify],
   )
 
   const scheduleReconnect = useCallback(() => {
@@ -404,6 +411,8 @@ export function usePokerClient() {
     logs,
     showdown,
     profile,
+    toast,
+    dismissToast: () => setToast(null),
     connect,
     api,
   }

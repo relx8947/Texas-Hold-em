@@ -15,6 +15,8 @@ export function ActionBar({ state, onStartGame, onAction }: Props) {
   const you = state.you
   const publicYou = useMemo(() => state.players.find((p) => p.id === you.id) ?? null, [state.players, you.id])
   const isHost = state.hostId === you.id
+  const readyPlayers = state.players.filter((p) => p.connected && !p.sittingOut && p.chips > 0).length
+  const canStart = isHost && readyPlayers >= 2
   const isYourTurn = !!publicYou?.current
   const callNeeded = Math.max(0, state.currentBet - you.betRound)
   const callDisplay = Math.min(callNeeded, you.chips)
@@ -74,14 +76,18 @@ export function ActionBar({ state, onStartGame, onAction }: Props) {
         <div className="actionInfo">
           <div className="title">{state.stage === 'waiting' ? '等待开局' : canAct ? '轮到你行动' : '等待其他玩家'}</div>
           <div className="meta">
-            当前下注 {state.currentBet} · 最小加注 {state.minRaise} · 你的筹码 {you.chips}
+            {state.stage === 'waiting'
+              ? readyPlayers >= 2
+                ? `已就绪 ${readyPlayers} 人${isHost ? '，可以开始' : '，等待房主开始'}`
+                : `至少需要 2 名有筹码的玩家才能开始（当前 ${readyPlayers} 人）`
+              : `当前下注 ${state.currentBet} · 最小加注 ${state.minRaise} · 你的筹码 ${you.chips}`}
           </div>
         </div>
       </div>
 
       <div className="actionRight">
         {state.stage === 'waiting' ? (
-          <button className="btn" onClick={onStartGame} disabled={!isHost}>
+          <button className="btn" onClick={onStartGame} disabled={!canStart} title={!isHost ? '只有房主可以开始' : readyPlayers < 2 ? '至少需要 2 名有筹码的玩家' : ''}>
             开始
           </button>
         ) : (
