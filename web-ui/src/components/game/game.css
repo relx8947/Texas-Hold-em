@@ -282,6 +282,12 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.statusTag.ready {
+  background: #1c8b4a;
+  color: #fff;
+  border: 1px solid #5fd3a0;
+}
+
 .betTag {
   position: absolute;
   top: 40px;

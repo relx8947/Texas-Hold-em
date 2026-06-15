@@ -82,6 +82,7 @@ export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, 
         {player.betRound > 0 ? <div className="betTag">+{player.betRound}</div> : null}
         {!player.connected ? <div className="statusTag off">离线</div> : null}
         {player.sittingOut ? <div className="statusTag out">离座</div> : null}
+        {player.ready && !player.sittingOut ? <div className="statusTag ready">已准备</div> : null}
         {player.allIn ? <div className="statusTag allin">All-In</div> : null}
         {player.folded ? <div className="statusTag fold">弃牌</div> : null}
       </div>
