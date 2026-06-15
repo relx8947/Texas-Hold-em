@@ -53,6 +53,7 @@ func (g *Game) StartHand() error {
 		return errors.New("需要至少2名有筹码的玩家才能开始")
 	}
 	g.Room.HandID++
+	g.Room.applyBlindLevelLocked()
 	g.Stage = "preflop"
 	g.Deck = newDeck()
 	g.shuffle()
@@ -66,11 +67,17 @@ func (g *Game) StartHand() error {
 			continue
 		}
 		p.Hole = nil
-		p.Folded = !p.Connected || p.Chips <= 0 || p.SittingOut
+		// Do not fold a player merely because they are disconnected: within the
+		// reconnect grace window they stay in the hand. Absent players are handled
+		// by auto-check (when nothing to call) or by the action timeout otherwise,
+		// so a brief wifi blip / app backgrounding never forfeits the whole hand.
+		p.Folded = p.Chips <= 0 || p.SittingOut || p.Spectator
 		p.AllIn = false
 		p.BetRound = 0
 		p.TotalBet = 0
 		p.Acted = false
+		p.HandStartChips = p.Chips
+		p.DealtIn = !p.Folded
 	}
 
 	g.DealerIndex = g.nextEligibleIndex(g.DealerIndex)
@@ -436,6 +443,9 @@ func (g *Game) refundUncalledBets() {
 
 // endHandReset clears per-hand state after a hand concludes.
 func (g *Game) endHandReset() {
+	// Capture hand statistics (net profit, hole/community for history) BEFORE we
+	// wipe per-hand state below.
+	g.Room.recordHandStatsLocked()
 	g.Stage = "waiting"
 	g.CurrentBet = 0
 	g.MinRaise = g.BigBlind
@@ -449,7 +459,7 @@ func (g *Game) endHandReset() {
 		p.BetRound = 0
 		p.TotalBet = 0
 		p.Acted = false
-		p.Folded = !p.Connected || p.Chips <= 0 || p.SittingOut
+		p.Folded = p.Chips <= 0 || p.SittingOut
 		p.AllIn = false
 	}
 }
@@ -606,7 +616,7 @@ func (g *Game) nextEligibleIndex(start int) int {
 	for i := 1; i <= len(players); i++ {
 		idx := (start + i) % len(players)
 		p := players[idx]
-		if p != nil && p.Connected && p.Chips > 0 && !p.SittingOut && !p.PendingRemoval {
+		if p != nil && p.Connected && p.Chips > 0 && !p.SittingOut && !p.PendingRemoval && !p.Spectator {
 			return idx
 		}
 	}
@@ -621,7 +631,7 @@ func (g *Game) nextActionIndex(start int) int {
 	for i := 1; i <= len(players); i++ {
 		idx := (start + i) % len(players)
 		p := players[idx]
-		if p == nil || p.Folded || p.AllIn || p.SittingOut {
+		if p == nil || p.Folded || p.AllIn || p.SittingOut || p.Spectator {
 			continue
 		}
 		return idx
@@ -632,7 +642,7 @@ func (g *Game) nextActionIndex(start int) int {
 func (g *Game) countEligiblePlayers() int {
 	count := 0
 	for _, p := range g.Room.Seats {
-		if p != nil && p.Connected && p.Chips > 0 && !p.SittingOut && !p.PendingRemoval {
+		if p != nil && p.Connected && p.Chips > 0 && !p.SittingOut && !p.PendingRemoval && !p.Spectator {
 			count++
 		}
 	}

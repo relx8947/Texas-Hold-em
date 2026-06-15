@@ -41,6 +41,7 @@ type ProfileRecord struct {
 	Chips       int
 	HandsPlayed int
 	HandsWon    int
+	NetProfit   int
 	UpdatedAt   time.Time
 }
 
@@ -143,11 +144,28 @@ func (s *Storage) initSchema() error {
 			time INTEGER NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_room ON chat(room_code);`,
+		`CREATE TABLE IF NOT EXISTS hand_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			profile_id TEXT NOT NULL,
+			hand_id INTEGER NOT NULL,
+			room_code TEXT NOT NULL,
+			stage TEXT NOT NULL DEFAULT '',
+			net INTEGER NOT NULL DEFAULT 0,
+			won INTEGER NOT NULL DEFAULT 0,
+			community TEXT NOT NULL DEFAULT '',
+			hole TEXT NOT NULL DEFAULT '',
+			rank TEXT NOT NULL DEFAULT '',
+			time INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_hand_history_profile ON hand_history(profile_id);`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	if err := s.addColumnIfMissing("profiles", "net_profit", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
 	}
 	if err := s.addColumnIfMissing("players", "avatar_seed", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
@@ -338,7 +356,7 @@ func (s *Storage) LoadProfile(id string) (ProfileRecord, error) {
 	var record ProfileRecord
 	var updatedAt int64
 	err := s.db.QueryRow(
-		`SELECT id, name, avatar_seed, chips, hands_played, hands_won, updated_at FROM profiles WHERE id = ?`,
+		`SELECT id, name, avatar_seed, chips, hands_played, hands_won, net_profit, updated_at FROM profiles WHERE id = ?`,
 		id,
 	).Scan(
 		&record.ID,
@@ -347,6 +365,7 @@ func (s *Storage) LoadProfile(id string) (ProfileRecord, error) {
 		&record.Chips,
 		&record.HandsPlayed,
 		&record.HandsWon,
+		&record.NetProfit,
 		&updatedAt,
 	)
 	if err != nil {
@@ -437,7 +456,7 @@ func (s *Storage) DebitProfileChips(id string, amount int) (ProfileRecord, bool,
 		var current ProfileRecord
 		var updatedAt int64
 		err := tx.QueryRow(
-			`SELECT id, name, avatar_seed, chips, hands_played, hands_won, updated_at FROM profiles WHERE id = ?`,
+			`SELECT id, name, avatar_seed, chips, hands_played, hands_won, net_profit, updated_at FROM profiles WHERE id = ?`,
 			id,
 		).Scan(
 			&current.ID,
@@ -446,6 +465,7 @@ func (s *Storage) DebitProfileChips(id string, amount int) (ProfileRecord, bool,
 			&current.Chips,
 			&current.HandsPlayed,
 			&current.HandsWon,
+			&current.NetProfit,
 			&updatedAt,
 		)
 		if err != nil {
@@ -458,7 +478,7 @@ func (s *Storage) DebitProfileChips(id string, amount int) (ProfileRecord, bool,
 	var record ProfileRecord
 	var updatedAt int64
 	if err := tx.QueryRow(
-		`SELECT id, name, avatar_seed, chips, hands_played, hands_won, updated_at FROM profiles WHERE id = ?`,
+		`SELECT id, name, avatar_seed, chips, hands_played, hands_won, net_profit, updated_at FROM profiles WHERE id = ?`,
 		id,
 	).Scan(
 		&record.ID,
@@ -467,6 +487,7 @@ func (s *Storage) DebitProfileChips(id string, amount int) (ProfileRecord, bool,
 		&record.Chips,
 		&record.HandsPlayed,
 		&record.HandsWon,
+		&record.NetProfit,
 		&updatedAt,
 	); err != nil {
 		return ProfileRecord{}, false, err
@@ -481,6 +502,77 @@ func (s *Storage) DebitProfileChips(id string, amount int) (ProfileRecord, bool,
 func (s *Storage) DeletePlayer(playerID string) error {
 	_, err := s.db.Exec(`DELETE FROM players WHERE id = ?`, playerID)
 	return err
+}
+
+const handHistoryLimit = 100
+
+// RecordHandResult updates a profile's aggregate stats and appends a hand-history
+// row in a single transaction. handsPlayed always increments; handsWon only when
+// the player won; net is the chip delta for the hand.
+func (s *Storage) RecordHandResult(profileID string, won bool, net int, entry HandHistoryEntry) error {
+	if profileID == "" {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	wonInc := 0
+	if won {
+		wonInc = 1
+	}
+	if _, err := tx.Exec(
+		`UPDATE profiles SET hands_played = hands_played + 1, hands_won = hands_won + ?, net_profit = net_profit + ?, updated_at = ? WHERE id = ?`,
+		wonInc, net, time.Now().Unix(), profileID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO hand_history (profile_id, hand_id, room_code, stage, net, won, community, hole, rank, time)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		profileID, entry.HandID, entry.RoomCode, entry.Stage, entry.Net, boolToInt(entry.Won),
+		entry.Community, entry.Hole, entry.Rank, entry.TimeUnix,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM hand_history WHERE profile_id = ? AND id NOT IN (
+			SELECT id FROM hand_history WHERE profile_id = ? ORDER BY id DESC LIMIT ?
+		)`,
+		profileID, profileID, handHistoryLimit,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Storage) LoadHandHistory(profileID string, limit int) ([]HandHistoryEntry, error) {
+	if limit <= 0 || limit > handHistoryLimit {
+		limit = handHistoryLimit
+	}
+	rows, err := s.db.Query(
+		`SELECT hand_id, room_code, stage, net, won, community, hole, rank, time
+		 FROM hand_history WHERE profile_id = ? ORDER BY id DESC LIMIT ?`,
+		profileID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []HandHistoryEntry
+	for rows.Next() {
+		var e HandHistoryEntry
+		var won int
+		if err := rows.Scan(&e.HandID, &e.RoomCode, &e.Stage, &e.Net, &won, &e.Community, &e.Hole, &e.Rank, &e.TimeUnix); err != nil {
+			return nil, err
+		}
+		e.Won = won == 1
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 func (s *Storage) DeleteRoom(roomCode string) error {

@@ -79,8 +79,14 @@ type Room struct {
 	LastEvent          *LastEvent
 	pendingMsgs        []WSMessage
 	pendingSettlements []chipCredit
+	pendingStats       []handStat
 	nextHandTimer      *time.Timer
 	AutoContinue       bool
+	Tournament         bool
+	BlindIncreaseEvery int // hands per blind level; 0 disables increases
+	HandsThisLevel     int
+	BlindLevel         int
+	Spectators         []*Player
 	lastPersistKey     string
 	mu                 sync.Mutex
 }
@@ -88,6 +94,13 @@ type Room struct {
 type chipCredit struct {
 	profileID string
 	amount    int
+}
+
+type handStat struct {
+	profileID string
+	won       bool
+	net       int
+	entry     HandHistoryEntry
 }
 
 type Player struct {
@@ -99,6 +112,8 @@ type Player struct {
 	Conn            *websocket.Conn
 	sendMu          sync.Mutex
 	Chips           int
+	HandStartChips  int
+	DealtIn         bool
 	Hole            []Card
 	Folded          bool
 	AllIn           bool
@@ -107,6 +122,8 @@ type Player struct {
 	Acted           bool
 	Connected       bool
 	SittingOut      bool
+	Ready           bool
+	Spectator       bool
 	PendingRemoval  bool
 	BankrollSettled bool
 	DisconnectedAt  *time.Time
@@ -119,13 +136,15 @@ type WSMessage struct {
 }
 
 type CreateRoomPayload struct {
-	PlayerName   string `json:"playerName"`
-	PlayerID     string `json:"playerId"`
-	ProfileID    string `json:"profileId"`
-	RoomName     string `json:"roomName"`
-	RoomPassword string `json:"roomPassword"`
-	MaxPlayers   int    `json:"maxPlayers"`
-	BuyIn        int    `json:"buyIn"`
+	PlayerName         string `json:"playerName"`
+	PlayerID           string `json:"playerId"`
+	ProfileID          string `json:"profileId"`
+	RoomName           string `json:"roomName"`
+	RoomPassword       string `json:"roomPassword"`
+	MaxPlayers         int    `json:"maxPlayers"`
+	BuyIn              int    `json:"buyIn"`
+	Tournament         bool   `json:"tournament"`
+	BlindIncreaseEvery int    `json:"blindIncreaseEvery"`
 }
 
 type JoinRoomPayload struct {
@@ -135,6 +154,7 @@ type JoinRoomPayload struct {
 	ProfileID    string `json:"profileId"`
 	RoomPassword string `json:"roomPassword"`
 	BuyIn        int    `json:"buyIn"`
+	AsSpectator  bool   `json:"asSpectator"`
 }
 
 type LoginPayload struct {
@@ -193,6 +213,7 @@ type PublicPlayer struct {
 	Folded     bool   `json:"folded"`
 	AllIn      bool   `json:"allIn"`
 	SittingOut bool   `json:"sittingOut"`
+	Ready      bool   `json:"ready"`
 	Dealer     bool   `json:"dealer"`
 	Current    bool   `json:"current"`
 	Connected  bool   `json:"connected"`
@@ -210,6 +231,8 @@ type PrivatePlayer struct {
 	Folded     bool     `json:"folded"`
 	AllIn      bool     `json:"allIn"`
 	SittingOut bool     `json:"sittingOut"`
+	Ready      bool     `json:"ready"`
+	Spectator  bool     `json:"spectator"`
 }
 
 type StatePayload struct {
@@ -230,6 +253,16 @@ type StatePayload struct {
 	ActionDeadline int64          `json:"actionDeadline"`
 	ServerTime     int64          `json:"serverTime"`
 	LastEvent      *LastEvent     `json:"lastEvent"`
+	Tournament     bool           `json:"tournament"`
+	BlindLevel     int            `json:"blindLevel"`
+	HandsToBlindUp int            `json:"handsToBlindUp"`
+	Spectators     []Spectator    `json:"spectators"`
+}
+
+type Spectator struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	AvatarSeed string `json:"avatarSeed"`
 }
 
 type LastEvent struct {
@@ -278,6 +311,19 @@ type ProfileResponse struct {
 	Chips       int    `json:"chips"`
 	HandsPlayed int    `json:"handsPlayed"`
 	HandsWon    int    `json:"handsWon"`
+	NetProfit   int    `json:"netProfit"`
+}
+
+type HandHistoryEntry struct {
+	HandID    int64  `json:"handId"`
+	RoomCode  string `json:"roomCode"`
+	Stage     string `json:"stage"`
+	Net       int    `json:"net"`
+	Won       bool   `json:"won"`
+	Community string `json:"community"`
+	Hole      string `json:"hole"`
+	Rank      string `json:"rank"`
+	TimeUnix  int64  `json:"time"`
 }
 
 type gameSnapshot struct {
@@ -290,6 +336,11 @@ type gameSnapshot struct {
 	BigBlind     int
 	DealerIndex  int
 	CurrentIndex int
+
+	Tournament     bool
+	BlindLevel     int
+	HandsToBlindUp int
+	Spectators     []Spectator
 }
 
 type RoomSnapshot struct {
@@ -346,6 +397,7 @@ func (s *Server) LoadFromStorage() error {
 			_ = s.settleStoredPlayerRecord(p)
 		}
 		_ = s.storage.DeleteRoom(record.Code)
+		log.Printf("restart recovery: room %s closed, %d seated players' chips returned to their bankroll (in-progress hand discarded)", record.Code, len(players))
 	}
 	return nil
 }
@@ -683,6 +735,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(updatedProfile)})
 			room.mu.Lock()
 			player.Chips += payload.Amount
+			if player.Spectator {
+				player.Spectator = false
+				player.SittingOut = false
+			}
 			room.LastEvent = &LastEvent{Kind: "top_up", PlayerID: player.ID, Amount: payload.Amount, Seat: player.Seat}
 			room.mu.Unlock()
 			room.broadcastState()
@@ -707,10 +763,32 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			room.mu.Lock()
+			if player.Spectator && player.Chips <= 0 {
+				room.mu.Unlock()
+				writeError(conn, "请先补码后再入座")
+				continue
+			}
+			player.Spectator = false
 			player.SittingOut = false
 			room.LastEvent = &LastEvent{Kind: "sit_in", PlayerID: player.ID, Seat: player.Seat}
 			room.mu.Unlock()
 			room.broadcastState()
+		case "ready":
+			if room == nil || player == nil {
+				writeError(conn, "请先加入房间")
+				continue
+			}
+			room.mu.Lock()
+			player.Ready = !player.Ready
+			room.mu.Unlock()
+			room.broadcastState()
+		case "get_history":
+			history, err := s.loadHandHistory(sessionProfile.ID)
+			if err != nil {
+				writeError(conn, err.Error())
+				continue
+			}
+			writeJSON(conn, WSMessage{Type: "hand_history", Payload: mustJSON(map[string]interface{}{"history": history})})
 		case "leave_room":
 			if room == nil || player == nil {
 				writeError(conn, "请先加入房间")
@@ -755,8 +833,23 @@ func (s *Server) createRoom(payload CreateRoomPayload, conn *websocket.Conn) (*R
 		Seats:        make([]*Player, maxPlayers),
 		CreatedAt:    time.Now(),
 		AutoContinue: true,
+		Tournament:   payload.Tournament,
+	}
+	if payload.Tournament {
+		every := payload.BlindIncreaseEvery
+		if every <= 0 {
+			every = 8
+		}
+		if every > 1000 {
+			every = 1000
+		}
+		room.BlindIncreaseEvery = every
 	}
 	room.Game = NewGame(room)
+	if payload.Tournament {
+		room.Game.SmallBlind = blindSchedule[0][0]
+		room.Game.BigBlind = blindSchedule[0][1]
+	}
 	player := room.addPlayerLocked(randomID(), profile.ID, profile.Name, profile.AvatarSeed, conn, buyIn)
 	room.HostID = player.ID
 	s.mu.Lock()
@@ -875,6 +968,19 @@ func (s *Server) joinRoom(payload JoinRoomPayload, conn *websocket.Conn) (*Room,
 	if room.isFullLocked() {
 		return nil, nil, errors.New("房间已满")
 	}
+	if payload.AsSpectator {
+		// Spectators take a seat but are not dealt in and pay no buy-in. They can
+		// switch to playing later via sit_in (which prompts a buy-in client-side).
+		player := room.addPlayerLocked(randomID(), profile.ID, profile.Name, profile.AvatarSeed, conn, 0)
+		player.Spectator = true
+		player.SittingOut = true
+		writeJSON(conn, WSMessage{
+			Type:    "room_joined",
+			Payload: mustJSON(map[string]string{"roomCode": room.Code, "playerId": player.ID}),
+		})
+		writeJSON(conn, WSMessage{Type: "profile", Payload: mustJSON(profile)})
+		return room, player, nil
+	}
 	updatedProfile, err := s.debitProfileChips(profile.ID, buyIn)
 	if err != nil {
 		return nil, nil, err
@@ -984,6 +1090,20 @@ func (s *Server) listRooms() []RoomSummary {
 	return summaries
 }
 
+func (s *Server) loadHandHistory(profileID string) ([]HandHistoryEntry, error) {
+	if s.storage == nil || strings.TrimSpace(profileID) == "" {
+		return []HandHistoryEntry{}, nil
+	}
+	entries, err := s.storage.LoadHandHistory(profileID, handHistoryLimit)
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []HandHistoryEntry{}
+	}
+	return entries, nil
+}
+
 func (s *Server) ensureProfile(playerID string, playerName string) (ProfileResponse, error) {
 	name := strings.TrimSpace(playerName)
 	if name == "" {
@@ -1081,6 +1201,7 @@ func profileResponse(record ProfileRecord) ProfileResponse {
 		Chips:       record.Chips,
 		HandsPlayed: record.HandsPlayed,
 		HandsWon:    record.HandsWon,
+		NetProfit:   record.NetProfit,
 	}
 }
 
@@ -1371,6 +1492,94 @@ func (r *Room) flushPendingMessages() {
 		}
 	}
 	r.flushSettlements()
+	r.flushStats()
+}
+
+// blindSchedule defines the small/big blind for each tournament level.
+var blindSchedule = [][2]int{
+	{10, 20}, {15, 30}, {25, 50}, {50, 100}, {75, 150},
+	{100, 200}, {150, 300}, {200, 400}, {300, 600}, {500, 1000},
+	{700, 1400}, {1000, 2000}, {1500, 3000}, {2000, 4000}, {3000, 6000},
+}
+
+// applyBlindLevelLocked raises the blinds on schedule for tournament rooms. It
+// runs at the start of each hand (HandID already incremented for this hand).
+func (r *Room) applyBlindLevelLocked() {
+	if !r.Tournament || r.BlindIncreaseEvery <= 0 || r.Game == nil {
+		return
+	}
+	// Count completed hands to decide the level. HandID is the current (1-based)
+	// hand number, so completed hands = HandID-1.
+	completed := r.HandID - 1
+	if completed < 0 {
+		completed = 0
+	}
+	level := int(completed) / r.BlindIncreaseEvery
+	if level >= len(blindSchedule) {
+		level = len(blindSchedule) - 1
+	}
+	if level < 0 {
+		level = 0
+	}
+	prevLevel := r.BlindLevel
+	r.BlindLevel = level
+	r.Game.SmallBlind = blindSchedule[level][0]
+	r.Game.BigBlind = blindSchedule[level][1]
+	if level != prevLevel && r.HandID > 1 {
+		r.queueInfoLocked(fmt.Sprintf("盲注升级：%d/%d", r.Game.SmallBlind, r.Game.BigBlind))
+	}
+}
+
+// recordHandStatsLocked queues per-player stat updates for the hand that just
+// ended (hands played/won, net profit, and a hand-history row). Applied to the
+// DB after the room lock is released via flushStats.
+func (r *Room) recordHandStatsLocked() {
+	if r.Game == nil {
+		return
+	}
+	community := cardsToString(r.Game.Community)
+	communityStr := strings.Join(community, " ")
+	now := time.Now().Unix()
+	for _, p := range r.Seats {
+		if p == nil || !p.DealtIn || p.ProfileID == "" {
+			continue
+		}
+		net := p.Chips - p.HandStartChips
+		won := net > 0
+		entry := HandHistoryEntry{
+			HandID:    r.HandID,
+			RoomCode:  r.Code,
+			Stage:     r.Game.Stage,
+			Net:       net,
+			Won:       won,
+			Community: communityStr,
+			Hole:      strings.Join(cardsToString(p.Hole), " "),
+			TimeUnix:  now,
+		}
+		r.pendingStats = append(r.pendingStats, handStat{
+			profileID: p.ProfileID,
+			won:       won,
+			net:       net,
+			entry:     entry,
+		})
+		p.DealtIn = false
+	}
+}
+
+// flushStats persists queued per-hand stats outside the room lock.
+func (r *Room) flushStats() {
+	r.mu.Lock()
+	stats := r.pendingStats
+	r.pendingStats = nil
+	r.mu.Unlock()
+	if r.Server == nil || r.Server.storage == nil {
+		return
+	}
+	for _, s := range stats {
+		if err := r.Server.storage.RecordHandResult(s.profileID, s.won, s.net, s.entry); err != nil {
+			log.Printf("record hand stat failed for profile %s: %v", s.profileID, err)
+		}
+	}
 }
 
 // scheduleNextHandLocked auto-starts the next hand a few seconds after a hand
@@ -1524,13 +1733,26 @@ func (r *Room) handleActionTimeout(token int64, seat int) {
 		r.mu.Unlock()
 		return
 	}
+	// Smart auto-pilot: if the player faces no outstanding bet, check for free
+	// instead of forfeiting the hand. Only fold when there is something to call.
+	// This keeps a briefly-disconnected player in the hand whenever possible.
+	canCheck := r.Game.CurrentBet == player.BetRound
+	autoAction := "fold"
+	if canCheck {
+		autoAction = "check"
+	}
+	playerName := player.Name
 	func() {
 		defer r.mu.Unlock()
-		_ = r.Game.ApplyAction(player.ID, PlayerAction{Action: "fold"})
+		_ = r.Game.ApplyAction(player.ID, PlayerAction{Action: autoAction})
 		r.resetActionTimerLocked()
 	}()
 	r.flushPendingMessages()
-	r.broadcastInfo(fmt.Sprintf("%s 超时自动弃牌", player.Name))
+	if autoAction == "check" {
+		r.broadcastInfo(fmt.Sprintf("%s 超时自动过牌", playerName))
+	} else {
+		r.broadcastInfo(fmt.Sprintf("%s 超时自动弃牌", playerName))
+	}
 	r.broadcastState()
 }
 
@@ -1635,7 +1857,24 @@ func (r *Room) broadcastState() {
 		BigBlind:     game.BigBlind,
 		DealerIndex:  game.DealerIndex,
 		CurrentIndex: game.CurrentIndex,
+		Tournament:   r.Tournament,
+		BlindLevel:   r.BlindLevel,
 	}
+	if r.Tournament && r.BlindIncreaseEvery > 0 {
+		completed := r.HandID
+		if completed < 0 {
+			completed = 0
+		}
+		remaining := r.BlindIncreaseEvery - int(completed)%r.BlindIncreaseEvery
+		snapshot.HandsToBlindUp = remaining
+	}
+	spectators := []Spectator{}
+	for _, p := range players {
+		if p != nil && p.Spectator {
+			spectators = append(spectators, Spectator{ID: p.ID, Name: p.Name, AvatarSeed: p.AvatarSeed})
+		}
+	}
+	snapshot.Spectators = spectators
 	actionDeadline := r.ActionDeadline
 	serverTime := time.Now().UnixMilli()
 	type outbound struct {
@@ -1677,6 +1916,11 @@ func (r *Room) buildStateForSnapshot(player *Player, game gameSnapshot, seatPlay
 		if p == nil {
 			continue
 		}
+		if p.Spectator {
+			// Spectators are surfaced separately via the spectators list, not as a
+			// table seat.
+			continue
+		}
 		public := PublicPlayer{
 			ID:         p.ID,
 			Name:       p.Name,
@@ -1688,6 +1932,7 @@ func (r *Room) buildStateForSnapshot(player *Player, game gameSnapshot, seatPlay
 			Folded:     p.Folded,
 			AllIn:      p.AllIn,
 			SittingOut: p.SittingOut,
+			Ready:      p.Ready,
 			Connected:  p.Connected,
 			Dealer:     idx == game.DealerIndex && game.Stage != "waiting",
 			Current:    idx == game.CurrentIndex,
@@ -1717,6 +1962,10 @@ func (r *Room) buildStateForSnapshot(player *Player, game gameSnapshot, seatPlay
 		ActionDeadline: deadline,
 		ServerTime:     serverTime,
 		LastEvent:      lastEvent,
+		Tournament:     game.Tournament,
+		BlindLevel:     game.BlindLevel,
+		HandsToBlindUp: game.HandsToBlindUp,
+		Spectators:     game.Spectators,
 		You: PrivatePlayer{
 			ID:         player.ID,
 			Name:       player.Name,
@@ -1729,6 +1978,8 @@ func (r *Room) buildStateForSnapshot(player *Player, game gameSnapshot, seatPlay
 			Folded:     player.Folded,
 			AllIn:      player.AllIn,
 			SittingOut: player.SittingOut,
+			Ready:      player.Ready,
+			Spectator:  player.Spectator,
 		},
 	}
 
