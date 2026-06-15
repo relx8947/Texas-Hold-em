@@ -25,6 +25,109 @@ func newTestRoom(chips ...int) *Room {
 	return room
 }
 
+// TestDealerRotatesToNextEligibleSeat verifies the button advances to the next
+// eligible player each hand, skipping seats with no chips.
+func TestDealerRotatesToNextEligibleSeat(t *testing.T) {
+	room := newTestRoom(2000, 2000, 2000)
+	if err := room.Game.StartHand(); err != nil {
+		t.Fatalf("StartHand() error = %v", err)
+	}
+	firstDealer := room.Game.DealerIndex
+
+	// Force the hand to end and start a new one.
+	room.Game.endHandReset()
+	if err := room.Game.StartHand(); err != nil {
+		t.Fatalf("second StartHand() error = %v", err)
+	}
+	secondDealer := room.Game.DealerIndex
+	if secondDealer == firstDealer {
+		t.Fatalf("dealer did not rotate: stayed at %d", firstDealer)
+	}
+	if room.Game.nextEligibleIndex(firstDealer) != secondDealer {
+		t.Fatalf("dealer = %d, want next eligible after %d (%d)", secondDealer, firstDealer, room.Game.nextEligibleIndex(firstDealer))
+	}
+}
+
+// TestDealerSkipsBustedPlayer ensures a player with zero chips is skipped when
+// the button rotates (busted/sitting-out players are not dealt in).
+func TestDealerSkipsBustedPlayer(t *testing.T) {
+	room := newTestRoom(2000, 0, 2000)
+	if err := room.Game.StartHand(); err != nil {
+		t.Fatalf("StartHand() error = %v", err)
+	}
+	if room.Game.DealerIndex == 1 {
+		t.Fatalf("dealer landed on busted seat 1")
+	}
+	// The busted player must be folded out of the hand.
+	if !room.Seats[1].Folded {
+		t.Fatalf("busted player not folded")
+	}
+}
+
+// TestSpectatorNotDealtIn verifies spectators are excluded from eligibility and
+// never dealt into a hand.
+func TestSpectatorNotDealtIn(t *testing.T) {
+	room := newTestRoom(2000, 2000, 2000)
+	room.Seats[2].Spectator = true
+	if room.Game.countEligiblePlayers() != 2 {
+		t.Fatalf("eligible players = %d, want 2 (spectator excluded)", room.Game.countEligiblePlayers())
+	}
+	if err := room.Game.StartHand(); err != nil {
+		t.Fatalf("StartHand() error = %v", err)
+	}
+	if len(room.Seats[2].Hole) != 0 {
+		t.Fatalf("spectator was dealt %d cards, want 0", len(room.Seats[2].Hole))
+	}
+	if !room.Seats[2].Folded {
+		t.Fatalf("spectator should be folded out of the hand")
+	}
+}
+
+// TestDisconnectedPlayerStaysInHand guards the grace-window behavior: a
+// disconnected (but not removed) player is still dealt in rather than folded.
+func TestDisconnectedPlayerStaysInHand(t *testing.T) {
+	room := newTestRoom(2000, 2000, 2000)
+	// Seat 0 is briefly disconnected but still seated with chips.
+	room.Seats[0].Connected = false
+	if err := room.Game.StartHand(); err != nil {
+		t.Fatalf("StartHand() error = %v", err)
+	}
+	if room.Seats[0].Folded {
+		t.Fatalf("disconnected player was auto-folded; should stay in during grace window")
+	}
+	if len(room.Seats[0].Hole) != 2 {
+		t.Fatalf("disconnected player hole cards = %d, want 2", len(room.Seats[0].Hole))
+	}
+}
+
+// TestTournamentBlindsIncrease verifies tournament rooms raise blinds after the
+// configured number of hands.
+func TestTournamentBlindsIncrease(t *testing.T) {
+	room := newTestRoom(100000, 100000)
+	room.Tournament = true
+	room.BlindIncreaseEvery = 2
+	room.Game.SmallBlind = blindSchedule[0][0]
+	room.Game.BigBlind = blindSchedule[0][1]
+
+	// Simulate playing several hands; blinds should step up every 2 hands.
+	levels := []int{}
+	for i := 0; i < 6; i++ {
+		room.HandID++
+		room.applyBlindLevelLocked()
+		levels = append(levels, room.BlindLevel)
+	}
+	// Hands 1,2 -> level 0; 3,4 -> level 1; 5,6 -> level 2.
+	want := []int{0, 0, 1, 1, 2, 2}
+	for i := range want {
+		if levels[i] != want[i] {
+			t.Fatalf("hand %d blind level = %d, want %d", i+1, levels[i], want[i])
+		}
+	}
+	if room.Game.BigBlind != blindSchedule[2][1] {
+		t.Fatalf("big blind = %d, want %d", room.Game.BigBlind, blindSchedule[2][1])
+	}
+}
+
 func TestStartHandPostsBlindsAndDealsHoleCards(t *testing.T) {
 	room := newTestRoom(2000, 2000, 2000)
 
