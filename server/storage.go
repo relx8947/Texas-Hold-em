@@ -63,6 +63,21 @@ func NewStorage(path string) (*Storage, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SQLite handles concurrency best with a single writer; serialize DB access
+	// and enable WAL + a busy timeout so concurrent goroutines wait instead of
+	// failing with "database is locked".
+	db.SetMaxOpenConns(1)
+	for _, pragma := range []string{
+		`PRAGMA journal_mode = WAL;`,
+		`PRAGMA busy_timeout = 5000;`,
+		`PRAGMA synchronous = NORMAL;`,
+		`PRAGMA foreign_keys = ON;`,
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	storage := &Storage{db: db}
 	if err := storage.initSchema(); err != nil {
 		_ = db.Close()

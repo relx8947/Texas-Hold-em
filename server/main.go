@@ -52,26 +52,41 @@ func serveStaticOrStatus(staticDir string) http.HandlerFunc {
 		absDir = staticDir
 	}
 	fileServer := http.FileServer(http.Dir(absDir))
+	indexPath := filepath.Join(absDir, "index.html")
+	_, indexErr := os.Stat(indexPath)
+	hasIndex := indexErr == nil
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			indexPath := filepath.Join(absDir, "index.html")
-			if _, err := os.Stat(indexPath); err == nil {
-				http.ServeFile(w, r, indexPath)
-				return
-			}
-		}
-		if r.URL.Path != "/" {
-			requestPath := filepath.Clean(r.URL.Path)
-			fullPath := filepath.Join(absDir, requestPath)
-			if rel, err := filepath.Rel(absDir, fullPath); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
-				if _, err := os.Stat(fullPath); err == nil {
-					fileServer.ServeHTTP(w, r)
-					return
-				}
-			}
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		if hasIndex {
+			http.ServeFile(w, r, indexPath)
+			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("Texas Hold'em LAN server running"))
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			serveIndex(w, r)
+			return
+		}
+		requestPath := filepath.Clean(r.URL.Path)
+		fullPath := filepath.Join(absDir, requestPath)
+		rel, relErr := filepath.Rel(absDir, fullPath)
+		safe := relErr == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+		if safe {
+			if info, statErr := os.Stat(fullPath); statErr == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// SPA fallback: unknown non-asset routes (client-side routing, refresh on
+		// a sub-path) should return index.html instead of plaintext. Real missing
+		// assets (with a file extension) get a proper 404.
+		if hasIndex && filepath.Ext(requestPath) == "" {
+			serveIndex(w, r)
+			return
+		}
+		http.NotFound(w, r)
 	}
 }
