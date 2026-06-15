@@ -96,10 +96,9 @@
   - 连锁问题：`ApplyAction` 在 `room.mu.Lock()` 后未用 `defer` 解锁（`server/server.go:577-587`、超时路径 `1318-1335`），panic 后锁不释放，该房间所有后续请求永久死锁、goroutine 堆积
   - 修复：建池前先退还未被跟注的多余下注（按第二高下注封顶）；对 `len(winners)==0`/`len(pot.Eligible)==0` 做保护；用 `defer` + `recover()` 确保锁释放
 
-- [x] 账号登录无密码校验，任意冒充他人账号 / 盗取筹码
-  - 位置：`server/server.go:860-899`（`login`）、`server/server.go:445-461`（登录处理）
-  - 原因：`login` 仅凭用户名加载/创建 profile 并返回（含筹码），`UpsertUser` 始终写入空 `password_hash`（`server.go:890`）；`users.password_hash` 字段存在但从不设置/校验
-  - 修复：登录/注册要求并校验密码（已有 `hashSecret`/`verifySecret` 辅助函数），不匹配则拒绝
+- [~] 账号登录无密码校验（不修复 / 设计如此）
+  - 说明：这是局域网好友局的有意设计——仅凭用户名即可进入，追求简便体验，不引入账号密码。
+  - 之前误当作漏洞加了 bcrypt 密码登录，已回退为仅用户名登录。`users.password_hash` 字段保留为空、不使用。
 
 ### 高 (High)
 
@@ -148,10 +147,9 @@
   - 原因：非根、非已存在文件的路径返回字面量字符串 "Texas Hold'em LAN server running"，SPA 子路由刷新会白屏/坏页；`index.html` 仅在精确 `/` 提供
   - 修复：对无匹配文件的非 API GET 回退到 `index.html`，缺失资源返回正确 404
 
-- [x] 密码/房间口令用无盐 SHA-256
-  - 位置：`server/server.go:1692-1698`（`hashSecret`）
-  - 原因：单次无盐 SHA-256，易受彩虹表/暴力破解
-  - 修复：用户密码改用 bcrypt/argon2id，并按每条加盐
+- [~] 房间口令用无盐 SHA-256（按现状保留）
+  - 位置：`hashSecret`
+  - 说明：账号已无密码（设计如此）。仅剩房间口令使用 SHA-256；房间口令是低价值、临时、共享的进房凭证，局域网场景下按现状保留，不引入 bcrypt。
 
 - [x] 依赖陈旧，含已知 CVE
   - 位置：`server/go.mod`/`go.sum`：`golang.org/x/net v0.17.0`（HTTP/2 CVE）、`google/uuid v1.3.0`、`modernc.org/sqlite v1.27.0`；go.mod 声明 `go 1.21`，本机 `go1.25.5`

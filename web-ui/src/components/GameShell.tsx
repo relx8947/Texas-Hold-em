@@ -63,7 +63,6 @@ export function GameShell() {
   const [panelMode, setPanelMode] = useState<PanelMode>('room')
   const [profileOpen, setProfileOpen] = useState(false)
   const [username, setUsername] = useState(() => localStorage.getItem('username') ?? '')
-  const [password, setPassword] = useState('')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [roomCode, setRoomCode] = useState('')
@@ -126,14 +125,13 @@ export function GameShell() {
   const canSubmit = playerName.trim().length > 0
   const isAuthed = authState === 'authenticated'
   const profileId = profile?.id ?? getStoredProfileId()
-  const canAuth = username.trim().length > 0 && password.length >= 4
+  const canAuth = username.trim().length > 0
 
   const submitAuth = () => {
     if (!canAuth) return
     localStorage.setItem('username', username.trim())
     api.login({
       username: username.trim(),
-      password,
     })
   }
 
@@ -166,18 +164,6 @@ export function GameShell() {
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="输入或创建用户名"
                 autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submitAuth()
-                }}
-              />
-            </label>
-            <label className="field loginField">
-              <div className="label">密码</div>
-              <input
-                value={password}
-                type="password"
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="至少 4 位，新用户名将自动注册"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') submitAuth()
                 }}

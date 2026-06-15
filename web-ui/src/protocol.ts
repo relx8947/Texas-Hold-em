@@ -24,7 +24,6 @@ export type JoinRoomPayload = {
 
 export type LoginPayload = {
   username: string
-  password: string
 }
 
 export type PlayerActionPayload = {

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -62,22 +61,22 @@ type Server struct {
 }
 
 type Room struct {
-	Server         *Server
-	Code           string
-	Name           string
-	MaxPlayers     int
-	HostID         string
-	PasswordHash   string
-	Seats          []*Player
-	Game           *Game
-	Chat           []ChatMessage
-	CreatedAt      time.Time
-	ActionDeadline time.Time
-	ActionTimer    *time.Timer
-	actionToken    int64
-	StateSeq       int64
-	HandID         int64
-	LastEvent      *LastEvent
+	Server             *Server
+	Code               string
+	Name               string
+	MaxPlayers         int
+	HostID             string
+	PasswordHash       string
+	Seats              []*Player
+	Game               *Game
+	Chat               []ChatMessage
+	CreatedAt          time.Time
+	ActionDeadline     time.Time
+	ActionTimer        *time.Timer
+	actionToken        int64
+	StateSeq           int64
+	HandID             int64
+	LastEvent          *LastEvent
 	pendingMsgs        []WSMessage
 	pendingSettlements []chipCredit
 	nextHandTimer      *time.Timer
@@ -140,7 +139,6 @@ type JoinRoomPayload struct {
 
 type LoginPayload struct {
 	Username string `json:"username"`
-	Password string `json:"password"`
 }
 
 type KickPayload struct {
@@ -904,16 +902,11 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 	if username == "" {
 		return ProfileResponse{}, errors.New("请输入用户名")
 	}
-	password := payload.Password
-	if len(password) < 4 {
-		return ProfileResponse{}, errors.New("密码至少需要4位")
-	}
 	user, err := s.storage.LoadUser(username)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return ProfileResponse{}, err
 		}
-		// First login for this username: register a new account.
 		profiles, err := s.storage.FindProfilesByName(username)
 		if err != nil {
 			return ProfileResponse{}, err
@@ -934,27 +927,10 @@ func (s *Server) login(payload LoginPayload) (ProfileResponse, error) {
 				return ProfileResponse{}, err
 			}
 		}
-		passwordHash, err := hashPassword(password)
-		if err != nil {
-			return ProfileResponse{}, err
-		}
-		if _, err := s.storage.UpsertUser(username, passwordHash, profile.ID); err != nil {
+		if _, err := s.storage.UpsertUser(username, "", profile.ID); err != nil {
 			return ProfileResponse{}, err
 		}
 		return profile, nil
-	}
-	// Existing account: verify the password.
-	if user.PasswordHash == "" {
-		// Legacy account created before passwords existed: bind this password now.
-		passwordHash, err := hashPassword(password)
-		if err != nil {
-			return ProfileResponse{}, err
-		}
-		if _, err := s.storage.UpsertUser(username, passwordHash, user.ProfileID); err != nil {
-			return ProfileResponse{}, err
-		}
-	} else if !verifyPassword(user.PasswordHash, password) {
-		return ProfileResponse{}, errors.New("用户名或密码错误")
 	}
 	profile, err := s.storage.LoadProfile(user.ProfileID)
 	if err != nil {
@@ -1932,8 +1908,6 @@ func isPrivateHost(host string) bool {
 	return ip.IsPrivate() || ip.IsLoopback()
 }
 
-// hashSecret hashes a room password with SHA-256. Room passwords are low-value,
-// shared, short-lived secrets; for user account passwords use hashPassword.
 func hashSecret(secret string) string {
 	trimmed := strings.TrimSpace(secret)
 	if trimmed == "" {
@@ -1952,23 +1926,6 @@ func verifySecret(hash string, secret string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(candidate)) == 1
-}
-
-// hashPassword hashes an account password with bcrypt.
-func hashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
-}
-
-// verifyPassword reports whether password matches the stored bcrypt hash.
-func verifyPassword(hash string, password string) bool {
-	if hash == "" {
-		return false
-	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
 func mustJSON(v interface{}) json.RawMessage {
