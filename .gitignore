@@ -24,3 +24,6 @@ server/texas-holdem-lan
 *.db
 *.db-shm
 *.db-wal
+logs/
+run/*.pid
+run/texas-holdem-lan
