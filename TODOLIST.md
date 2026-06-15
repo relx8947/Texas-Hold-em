@@ -239,43 +239,50 @@
 ## 玩法完善度评估（2026-06-15 复盘）
 
 > 评估结论：核心规则正确、能完整玩完一局，关键 bug 已修；但离「足够完善」仍有距离，主要卡在断线罚牌与无声音提醒等高频体验问题。下列按优先级排列。
+>
+> 状态：本轮已全部实现。后端 go build / go vet / go test（含 -race）通过，新增断线宽限/观战/锦标赛/庄家轮转回归测试；前端 eslint / tsc / vite build 通过。
 
 ### 高优先级（最影响实际体验）
 
-- [ ] 短暂断线会被罚没整手牌
+- [x] 短暂断线会被罚没整手牌
   - 现象：`StartHand`/手结束重置里 `Folded = !p.Connected`，wifi 抖动、切后台、手机锁屏都会让当前这手直接判弃
-  - 期望：断线宽限期内不立即弃牌——能过牌则自动过牌，否则等到行动超时才弃；重连后仍可继续这手
-  - 位置：`server/game.go`（`StartHand` 第 ~59 行、`endHandReset`、`awardPotToSingle` 的 Folded 赋值）、超时托管 `server/server.go handleActionTimeout`
+  - 已修复：`StartHand`/`endHandReset` 不再因 `!Connected` 自动弃牌；断线宽限期内玩家仍被发牌、留在本手；超时由「智能托管」处理（见下）。新增 `TestDisconnectedPlayerStaysInHand`
+  - 位置：`server/game.go`（`StartHand`、`endHandReset`）、超时托管 `server/server.go handleActionTimeout`
 
-- [ ] 轮到行动缺少声音/强提醒
-  - 现象：目前只有视觉动画（高亮 + 倒计时环），不盯屏幕容易超时被自动弃牌
-  - 期望：轮到自己时播放提示音 + 浏览器标签标题闪烁（如「⏰ 轮到你」）；提供可关闭的音效开关
+- [x] 轮到行动缺少声音/强提醒
+  - 已实现：轮到自己时播放 Web Audio 提示音（双音叮咚）+ 标签页隐藏时标题闪烁「⏰ 轮到你行动！」；HUD 提供 🔔/🔕 可关闭的音效开关（持久化到 localStorage）
+  - 位置：`web-ui/src/components/GameShell.tsx`（`playTurnChime`、isYourTurn effects、soundOn 开关）
 
-- [ ] 筹码归零后缺少补码引导
-  - 现象：筹码为 0 的玩家无法参与，但 UI 没有醒目提示，新手不知道要「补码」
-  - 期望：归零时在牌桌/行动栏给出明显的「筹码不足，请补码」提示与一键补码入口
+- [x] 筹码归零后缺少补码引导
+  - 已实现：筹码为 0 且非观战时，行动区上方显示醒目红色「筹码不足，无法参与下一手」横幅与「一键补码」按钮
+  - 位置：`web-ui/src/components/GameShell.tsx`（`brokeBanner`）、`GameShell.css`
 
-- [ ] 移动端牌桌布局拥挤
-  - 现象：6~10 人椭圆桌在小屏上座位/卡牌重叠拥挤
-  - 期望：针对窄屏优化座位尺寸与间距、卡牌缩放、行动栏布局
+- [x] 移动端牌桌布局拥挤
+  - 已实现：≤560px 断点整体缩放椭圆桌、缩小座位/头像/手牌/公共牌，行动栏改为纵向堆叠、滑块占满宽度
+  - 位置：`web-ui/src/components/GameShell.css`、`game.css`
 
 ### 中优先级（功能缺失，视定位取舍）
 
-- [ ] 服务器重启会丢失进行中的牌局
-  - 现象：`LoadFromStorage` 启动时结算所有在座筹码并删房，重启后牌局中断（筹码不丢，但当前牌局没了）
-  - 期望：可选地持久化并恢复进行中的牌局快照，或至少给玩家明确提示
+- [x] 服务器重启会丢失进行中的牌局
+  - 已实现：启动恢复时对每个房间记录明确日志（筹码已退回 bankroll、进行中的牌局被丢弃）；前端在重连命中 `room_not_found` 时已给出「房间已失效，可能是服务重启…剩余筹码会结算回资料余额」的明确提示
+  - 位置：`server/server.go LoadFromStorage`、`web-ui/src/usePokerClient.ts`
 
-- [ ] 没有锦标赛模式（盲注递增）
-  - 现状：固定盲注的现金局；缺少盲注按时间/手数递增、计时器等锦标赛玩法
+- [x] 没有锦标赛模式（盲注递增）
+  - 已实现：创建房间可勾选「锦标赛模式」并设置每多少手升盲；服务端按 15 级盲注表在每手开始时升盲并广播提示，HUD 显示当前盲注级别/盲注/距离升盲手数。新增 `TestTournamentBlindsIncrease`
+  - 位置：`server/server.go`（`blindSchedule`、`applyBlindLevelLocked`）、`game.go StartHand`、前端 protocol/GameShell
 
-- [ ] 缺少牌局历史 / 战绩回看
-  - 现状：只有当前这手的结算弹层；无历史手牌、盈亏曲线、战绩统计
+- [x] 缺少牌局历史 / 战绩回看
+  - 已实现：每手结束按 profile 落库手牌历史（净盈亏、底牌、阶段）并累计 hands_played/won/net_profit；HUD「战绩」按钮拉取并展示最近 100 手历史弹层
+  - 位置：`server/storage.go`（`hand_history` 表、`RecordHandResult`/`LoadHandHistory`）、`server.go recordHandStatsLocked`、前端 `HistoryPanel`
 
-- [ ] 缺少观战模式与「准备」状态
-  - 现状：进房即入座；无观战席、无开局前的准备/就绪流程
+- [x] 缺少观战模式与「准备」状态
+  - 已实现：加入房间可选「观战加入」（占座但不发牌、不买入）；观战者补码/入座后参与下一手；等待阶段提供「我已准备」开关并在座位上显示「已准备」徽标；牌桌顶部显示观战者列表。新增 `TestSpectatorNotDealtIn`
+  - 位置：`server/server.go`（spectator/ready 字段与处理）、`game.go`（eligibility 排除观战）、前端 protocol/GameShell/SeatView
 
 ### 低优先级（健壮性/边角）
 
-- [ ] 庄家按钮在有人离座/输光/中途加入时的轮转缺专门测试覆盖
-- [ ] 超时托管过于粗暴
-  - 现状：超时一律自动弃牌；可改为「能过牌则过牌」的智能托管，并考虑时间银行（time bank）
+- [x] 庄家按钮在有人离座/输光/中途加入时的轮转缺专门测试覆盖
+  - 已实现：新增 `TestDealerRotatesToNextEligibleSeat`、`TestDealerSkipsBustedPlayer`
+- [x] 超时托管过于粗暴
+  - 已实现：超时改为「能过牌则自动过牌，否则才弃牌」的智能托管，并相应提示「超时自动过牌/弃牌」
+  - 位置：`server/server.go handleActionTimeout`
