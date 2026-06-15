@@ -567,3 +567,116 @@
   min-width: 40px;
   text-align: right;
 }
+
+/* ===== In-game animations & feedback ===== */
+
+/* Active player's turn: pulsing gold ring so it is obvious who must act. */
+.seat.current .avatarRing {
+  animation: turnPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes turnPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 4px var(--hl-gold), 0 0 18px rgba(255, 215, 94, 0.65);
+  }
+  50% {
+    box-shadow: 0 0 0 6px var(--hl-gold), 0 0 30px rgba(255, 215, 94, 0.95);
+  }
+}
+
+/* Countdown ring around the active player, driven by --turn-progress (0..1). */
+.turnTimer {
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  background: conic-gradient(var(--hl-gold) calc(var(--turn-progress, 1) * 360deg), rgba(255, 255, 255, 0.12) 0deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  pointer-events: none;
+  z-index: 1;
+}
+
+.turnTimer.urgent {
+  background: conic-gradient(#ff5d52 calc(var(--turn-progress, 1) * 360deg), rgba(255, 255, 255, 0.12) 0deg);
+}
+
+/* "It's your turn" banner pulse on the action bar. */
+.actionBar.yourTurn {
+  animation: yourTurnGlow 1.4s ease-in-out infinite;
+  border-color: var(--hl-gold);
+}
+
+@keyframes yourTurnGlow {
+  0%, 100% { box-shadow: 0 12px 28px rgba(80, 9, 12, 0.22), 0 0 0 0 rgba(255, 215, 94, 0); }
+  50% { box-shadow: 0 12px 28px rgba(80, 9, 12, 0.22), 0 0 22px 2px rgba(255, 215, 94, 0.55); }
+}
+
+.actionBar.yourTurn .actionInfo .title {
+  color: var(--hl-gold);
+}
+
+/* Bet chip that pops in when a player wagers. */
+.betTag {
+  animation: betPop 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes betPop {
+  from { transform: translateY(8px) scale(0.6); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* Winner highlight on the seat that takes the pot. */
+.seat.winner .avatarRing {
+  animation: winnerGlow 1.2s ease-out 2;
+}
+
+@keyframes winnerGlow {
+  0% { box-shadow: 0 0 0 4px #ffe07a, 0 0 30px rgba(255, 215, 94, 0.95); transform: scale(1.06); }
+  100% { box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28); transform: scale(1); }
+}
+
+/* Pot increase flash. */
+.potChip.bump {
+  animation: potBump 360ms ease-out;
+}
+
+@keyframes potBump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); box-shadow: 0 0 22px rgba(247, 209, 110, 0.85); }
+  100% { transform: scale(1); }
+}
+
+/* Stage transition toast (flop/turn/river). */
+.stageToast {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1.5px solid var(--hl-gold);
+  color: var(--hl-gold);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 1px;
+  z-index: 40;
+  pointer-events: none;
+  animation: stageToast 1.6s ease-out forwards;
+}
+
+@keyframes stageToast {
+  0% { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.9); }
+  15% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seat.current .avatarRing,
+  .actionBar.yourTurn,
+  .potChip,
+  .seat.winner .avatarRing {
+    animation: none;
+  }
+}

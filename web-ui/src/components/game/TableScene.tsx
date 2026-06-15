@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import './game.css'
 import type { LastEvent, PublicPlayer } from '../../protocol'
 import { CardView } from './CardView'
@@ -15,6 +16,22 @@ type Props = {
   lastEvent?: LastEvent | null
   onKickPlayer?: (player: PublicPlayer) => void
   hostId?: string
+  actionDeadline?: number
+  serverTime?: number
+  actionTimeoutMs?: number
+}
+
+function stageLabel(stage: string): string | null {
+  switch (stage) {
+    case 'flop':
+      return '翻牌 Flop'
+    case 'turn':
+      return '转牌 Turn'
+    case 'river':
+      return '河牌 River'
+    default:
+      return null
+  }
 }
 
 function seatPositions(maxPlayers: number) {
@@ -51,13 +68,75 @@ export function TableScene({
   lastEvent,
   onKickPlayer,
   hostId,
+  actionDeadline,
+  serverTime,
+  actionTimeoutMs = 30000,
 }: Props) {
   const pos = seatPositions(maxPlayers)
   const bySeat = new Map<number, PublicPlayer>()
   for (const p of players) bySeat.set(p.seat, p)
 
+  // Live countdown progress (0..1) for the active player's timer ring. Correct
+  // for client/server clock skew using the serverTime sent with each snapshot.
+  const skewRef = useRef(0)
+  useEffect(() => {
+    if (typeof serverTime === 'number' && serverTime > 0) {
+      skewRef.current = Date.now() - serverTime
+    }
+  }, [serverTime])
+  const [turnProgress, setTurnProgress] = useState(1)
+  useEffect(() => {
+    if (!actionDeadline) {
+      // Reset asynchronously to avoid a synchronous setState in the effect body.
+      const id = window.setTimeout(() => setTurnProgress(1), 0)
+      return () => window.clearTimeout(id)
+    }
+    let raf = 0
+    const tick = () => {
+      const now = Date.now() - skewRef.current
+      const remaining = actionDeadline - now
+      const ratio = Math.max(0, Math.min(1, remaining / actionTimeoutMs))
+      setTurnProgress(ratio)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [actionDeadline, actionTimeoutMs])
+
+  // Winner highlight: briefly mark the seat that just won the pot. Set during
+  // render keyed on the event, cleared by an async timer.
+  const [winnerId, setWinnerId] = useState<string | null>(null)
+  const [winnerEventKey, setWinnerEventKey] = useState<LastEvent | null>(null)
+  const currentEvent = lastEvent ?? null
+  if (currentEvent !== winnerEventKey) {
+    setWinnerEventKey(currentEvent)
+    if (currentEvent?.kind === 'win' && currentEvent.playerId) {
+      setWinnerId(currentEvent.playerId)
+    }
+  }
+  useEffect(() => {
+    if (!winnerId) return
+    const t = window.setTimeout(() => setWinnerId(null), 2400)
+    return () => window.clearTimeout(t)
+  }, [winnerId])
+
+  // Stage-change toast (flop/turn/river). Set during render keyed on stage,
+  // cleared by an async timer.
+  const [toast, setToast] = useState<string | null>(null)
+  const [toastStageKey, setToastStageKey] = useState(stage)
+  if (stage !== toastStageKey) {
+    setToastStageKey(stage)
+    setToast(stageLabel(stage))
+  }
+  useEffect(() => {
+    if (!toast) return
+    const t = window.setTimeout(() => setToast(null), 1600)
+    return () => window.clearTimeout(t)
+  }, [toast])
+
   return (
     <div className="tableStage">
+      {toast ? <div key={toast} className="stageToast">{toast}</div> : null}
       <div className="tableCenter">
         <div className="communityRow">
           {Array.from({ length: 5 }).map((_, idx) => (
@@ -69,7 +148,7 @@ export function TableScene({
           ))}
         </div>
         <div className="potRow">
-          <div key={`pot-${pot}`} className="potChip">
+          <div key={`pot-${pot}`} className="potChip bump">
             底池 {pot}
           </div>
         </div>
@@ -133,6 +212,8 @@ export function TableScene({
             isHost={!!player && player.id === hostId}
             canKick={!!player && hostId === youId && player.id !== youId}
             onKick={onKickPlayer}
+            isWinner={!!player && player.id === winnerId}
+            turnProgress={player?.current ? turnProgress : null}
           />
         )
       })}

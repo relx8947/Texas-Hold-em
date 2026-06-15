@@ -12,18 +12,23 @@ type Props = {
   isHost?: boolean
   canKick?: boolean
   onKick?: (player: PublicPlayer) => void
+  isWinner?: boolean
+  turnProgress?: number | null
 }
 
-export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, onKick }: Props) {
+export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, onKick, isWinner, turnProgress }: Props) {
   const classes = ['seat']
   if (player?.current) classes.push('current')
   if (player?.folded) classes.push('folded')
+  if (isWinner) classes.push('winner')
   const emptySeatLabel = label.replace('座位 ', '')
+  const showTimer = !!player?.current && typeof turnProgress === 'number'
+  const urgent = showTimer && (turnProgress ?? 1) <= 0.25
 
   return (
     <div className={classes.join(' ')} style={{ left: `${x}%`, top: `${y}%` }}>
       {bubble ? <div className="actionBubble">{bubble}</div> : null}
-      
+
       {cards && cards.length > 0 ? (
         <div className="seatCards">
           {cards.slice(0, 2).map((c, idx) => (
@@ -34,6 +39,12 @@ export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, 
 
       <div className="seatMain">
         <div className="avatarRing">
+          {showTimer ? (
+            <div
+              className={`turnTimer ${urgent ? 'urgent' : ''}`}
+              style={{ ['--turn-progress' as string]: String(turnProgress) }}
+            />
+          ) : null}
           <PlayerAvatar
             seed={player?.avatarSeed ?? label}
             name={player?.name ?? emptySeatLabel}
