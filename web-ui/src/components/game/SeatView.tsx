@@ -21,9 +21,23 @@ export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, 
   if (player?.current) classes.push('current')
   if (player?.folded) classes.push('folded')
   if (isWinner) classes.push('winner')
+  if (!player) classes.push('empty')
   const emptySeatLabel = label.replace('座位 ', '')
   const showTimer = !!player?.current && typeof turnProgress === 'number'
   const urgent = showTimer && (turnProgress ?? 1) <= 0.25
+
+  if (!player) {
+    return (
+      <div className={classes.join(' ')} style={{ left: `${x}%`, top: `${y}%` }}>
+        <div className="emptySeat">
+          <div className="emptySeatRing">
+            <span className="emptySeatPlus">+</span>
+          </div>
+          <div className="emptySeatLabel">空位 {emptySeatLabel}</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={classes.join(' ')} style={{ left: `${x}%`, top: `${y}%` }}>
@@ -46,38 +60,32 @@ export function SeatView({ player, label, x, y, cards, bubble, isHost, canKick, 
             />
           ) : null}
           <PlayerAvatar
-            seed={player?.avatarSeed ?? label}
-            name={player?.name ?? emptySeatLabel}
-            label={player ? label : emptySeatLabel}
+            seed={player.avatarSeed ?? label}
+            name={player.name}
+            label={label}
             showMonogram={false}
           />
-          {player && isHost ? <div className="hostBadge">房主</div> : null}
-          {player?.dealer && <div className="dealerBadge">D</div>}
+          {isHost ? <div className="hostBadge">房主</div> : null}
+          {player.dealer && <div className="dealerBadge">D</div>}
         </div>
-        
+
         <div className="seatInfo">
-          <div className="namePill">{player ? player.name : label}</div>
-          {player ? (
-            <div className="chipsPill">
-              <span className="chipIcon">●</span>
-              {player.chips}
-            </div>
-          ) : (
-             <div className="chipsPill empty">空座</div>
-          )}
+          <div className="namePill">{player.name}</div>
+          <div className="chipsPill">
+            <span className="chipIcon">●</span>
+            {player.chips}
+          </div>
         </div>
       </div>
 
-      {player && (
-        <div className="seatStatus">
-           {player.betRound > 0 ? <div className="betTag">+{player.betRound}</div> : null}
-           {!player.connected ? <div className="statusTag off">离线</div> : null}
-           {player.sittingOut ? <div className="statusTag out">离座</div> : null}
-           {player.allIn ? <div className="statusTag allin">All-In</div> : null}
-           {player.folded ? <div className="statusTag fold">弃牌</div> : null}
-        </div>
-      )}
-      {player && canKick ? (
+      <div className="seatStatus">
+        {player.betRound > 0 ? <div className="betTag">+{player.betRound}</div> : null}
+        {!player.connected ? <div className="statusTag off">离线</div> : null}
+        {player.sittingOut ? <div className="statusTag out">离座</div> : null}
+        {player.allIn ? <div className="statusTag allin">All-In</div> : null}
+        {player.folded ? <div className="statusTag fold">弃牌</div> : null}
+      </div>
+      {canKick ? (
         <button className="seatKick" onClick={() => onKick?.(player)}>
           踢人
         </button>
