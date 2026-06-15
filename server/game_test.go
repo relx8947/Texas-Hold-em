@@ -69,7 +69,15 @@ func TestFoldAwardsPotToOnlyRemainingActivePlayer(t *testing.T) {
 		t.Fatalf("StartHand() error = %v", err)
 	}
 
-	if err := room.Game.ApplyAction(room.Seats[1].ID, PlayerAction{Action: "fold"}); err != nil {
+	// Heads-up: the dealer (seat 0) posts the small blind and acts first preflop.
+	if room.Game.CurrentIndex != 0 {
+		t.Fatalf("heads-up first to act = %d, want 0 (dealer/small blind)", room.Game.CurrentIndex)
+	}
+	if room.Seats[0].BetRound != room.Game.SmallBlind {
+		t.Fatalf("dealer small blind = %d, want %d", room.Seats[0].BetRound, room.Game.SmallBlind)
+	}
+
+	if err := room.Game.ApplyAction(room.Seats[0].ID, PlayerAction{Action: "fold"}); err != nil {
 		t.Fatalf("ApplyAction(fold) error = %v", err)
 	}
 
@@ -79,8 +87,8 @@ func TestFoldAwardsPotToOnlyRemainingActivePlayer(t *testing.T) {
 	if room.Game.Pot != 0 {
 		t.Fatalf("pot = %d, want 0", room.Game.Pot)
 	}
-	if room.Seats[0].Chips != 2010 {
-		t.Fatalf("winner chips = %d, want 2010", room.Seats[0].Chips)
+	if room.Seats[1].Chips != 2010 {
+		t.Fatalf("winner chips = %d, want 2010", room.Seats[1].Chips)
 	}
 }
 
@@ -103,5 +111,51 @@ func TestBuildSidePots(t *testing.T) {
 	}
 	if pots[2].Amount != 100 || len(pots[2].Eligible) != 1 || pots[2].Eligible[0].ID != "c" {
 		t.Fatalf("second side pot = %+v, want amount 100 eligible c", pots[2])
+	}
+}
+
+// TestRefundUncalledBets guards the critical bug where an over-bet that all
+// other players folded to would create a side pot with no eligible winner,
+// causing a division-by-zero panic at showdown.
+func TestRefundUncalledBets(t *testing.T) {
+	room := newTestRoom(0, 0)
+	room.Game.Pot = 250
+	room.Seats[0].TotalBet = 200 // raiser, others folded
+	room.Seats[0].Chips = 0
+	room.Seats[1].TotalBet = 50
+	room.Seats[1].Folded = true
+
+	room.Game.refundUncalledBets()
+
+	if room.Seats[0].Chips != 150 {
+		t.Fatalf("raiser chips after refund = %d, want 150", room.Seats[0].Chips)
+	}
+	if room.Seats[0].TotalBet != 50 {
+		t.Fatalf("raiser totalBet after refund = %d, want 50", room.Seats[0].TotalBet)
+	}
+	if room.Game.Pot != 100 {
+		t.Fatalf("pot after refund = %d, want 100", room.Game.Pot)
+	}
+}
+
+// TestResolveShowdownNoPanicOnUncalledAllIn ensures resolveShowdown completes
+// (no panic, returns to waiting) when the sole remaining contributor over-bet.
+func TestResolveShowdownNoPanicOnUncalledAllIn(t *testing.T) {
+	room := newTestRoom(0, 0, 0)
+	room.Game.Stage = "river"
+	room.Game.Pot = 300
+	room.Game.Community = []Card{{Rank: 2, Suit: 0}, {Rank: 5, Suit: 1}, {Rank: 9, Suit: 2}, {Rank: 11, Suit: 3}, {Rank: 13, Suit: 0}}
+	// Seat 0 over-bet, seats 1 and 2 folded after contributing less.
+	room.Seats[0].TotalBet = 200
+	room.Seats[0].Hole = []Card{{Rank: 14, Suit: 0}, {Rank: 14, Suit: 1}}
+	room.Seats[1].TotalBet = 50
+	room.Seats[1].Folded = true
+	room.Seats[2].TotalBet = 50
+	room.Seats[2].Folded = true
+
+	room.Game.resolveShowdown()
+
+	if room.Game.Stage != "waiting" {
+		t.Fatalf("stage after showdown = %q, want waiting", room.Game.Stage)
 	}
 }

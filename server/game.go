@@ -1,11 +1,11 @@
 package main
 
 import (
+	crand "crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"sort"
-	"time"
 )
 
 type Game struct {
@@ -20,7 +20,6 @@ type Game struct {
 	BigBlind     int
 	MinRaise     int
 	CurrentBet   int
-	rng          *rand.Rand
 }
 
 func NewGame(room *Room) *Game {
@@ -31,8 +30,19 @@ func NewGame(room *Room) *Game {
 		BigBlind:     20,
 		DealerIndex:  -1,
 		CurrentIndex: -1,
-		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+}
+
+// secureIntn returns a cryptographically secure random integer in [0, n).
+func secureIntn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	v, err := crand.Int(crand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(v.Int64())
 }
 
 func (g *Game) StartHand() error {
@@ -68,14 +78,24 @@ func (g *Game) StartHand() error {
 		return errors.New("没有可用庄家")
 	}
 	g.Room.LastEvent = &LastEvent{Kind: "hand_start", Stage: g.Stage, Seat: g.DealerIndex}
-	smallBlindIndex := g.nextEligibleIndex(g.DealerIndex)
-	bigBlindIndex := g.nextEligibleIndex(smallBlindIndex)
+
+	headsUp := eligible == 2
+	var smallBlindIndex, bigBlindIndex int
+	if headsUp {
+		// Heads-up: dealer posts the small blind, the other player the big blind.
+		smallBlindIndex = g.DealerIndex
+		bigBlindIndex = g.nextEligibleIndex(g.DealerIndex)
+	} else {
+		smallBlindIndex = g.nextEligibleIndex(g.DealerIndex)
+		bigBlindIndex = g.nextEligibleIndex(smallBlindIndex)
+	}
 
 	g.dealHoleCards()
 	g.postBlind(smallBlindIndex, g.SmallBlind)
 	bigPosted := g.postBlind(bigBlindIndex, g.BigBlind)
 	g.CurrentBet = bigPosted
 	g.MinRaise = g.BigBlind
+	// Action starts left of the big blind; heads-up this wraps to the dealer (small blind).
 	g.CurrentIndex = g.nextActionIndex(bigBlindIndex)
 	if g.CurrentIndex == -1 {
 		g.advanceStageIfNeeded()
@@ -299,9 +319,11 @@ func (g *Game) autoRunoutIfNeeded() {
 }
 
 func (g *Game) resolveShowdown() {
+	g.refundUncalledBets()
 	eligible := g.listNotFolded()
 	if len(eligible) == 0 {
-		g.Stage = "waiting"
+		g.endHandReset()
+		g.Room.onHandEndedLocked()
 		return
 	}
 	g.Room.LastEvent = &LastEvent{Kind: "showdown", Stage: g.Stage}
@@ -314,7 +336,16 @@ func (g *Game) resolveShowdown() {
 	pots := g.buildSidePots()
 	results := []ShowdownResult{}
 	for _, pot := range pots {
+		if pot.Amount <= 0 || len(pot.Eligible) == 0 {
+			continue
+		}
 		winners := bestPlayers(pot.Eligible, handValues)
+		if len(winners) == 0 {
+			continue
+		}
+		// Distribute odd chips starting from the first winner left of the dealer
+		// (standard rule), so the remainder is not always given to low seats.
+		winners = g.orderWinnersFromDealer(winners)
 		share := pot.Amount / len(winners)
 		remain := pot.Amount % len(winners)
 		winnerInfos := []ShowdownWinner{}
@@ -336,12 +367,75 @@ func (g *Game) resolveShowdown() {
 		})
 	}
 
-	g.Room.broadcastShowdown(ShowdownPayload{
+	g.Room.queueMessageLocked(WSMessage{Type: "showdown", Payload: mustJSON(ShowdownPayload{
 		Community: cardsToString(g.Community),
 		Players:   g.buildShowdownPlayers(handValues),
 		Results:   results,
-	})
+	})})
 
+	g.endHandReset()
+	g.Room.onHandEndedLocked()
+}
+
+// orderWinnersFromDealer sorts winners by seat order starting just left of the
+// dealer, so odd-chip remainders go to the player closest left of the button.
+func (g *Game) orderWinnersFromDealer(winners []*Player) []*Player {
+	if len(winners) <= 1 {
+		return winners
+	}
+	seatOf := map[string]int{}
+	for idx, p := range g.Room.Seats {
+		if p != nil {
+			seatOf[p.ID] = idx
+		}
+	}
+	n := len(g.Room.Seats)
+	rank := func(p *Player) int {
+		seat, ok := seatOf[p.ID]
+		if !ok || n == 0 {
+			return 1 << 30
+		}
+		return (seat - g.DealerIndex - 1 + 2*n) % n
+	}
+	ordered := append([]*Player{}, winners...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return rank(ordered[i]) < rank(ordered[j])
+	})
+	return ordered
+}
+
+// refundUncalledBets returns the portion of the largest wager that no other
+// player matched. Without this, an over-bet that everyone else folded to would
+// create a side pot with no eligible winner (division by zero at showdown).
+func (g *Game) refundUncalledBets() {
+	var top, second *Player
+	topBet, secondBet := 0, 0
+	for _, p := range g.Room.Seats {
+		if p == nil || p.TotalBet <= 0 {
+			continue
+		}
+		if p.TotalBet > topBet {
+			second = top
+			secondBet = topBet
+			top = p
+			topBet = p.TotalBet
+		} else if p.TotalBet > secondBet {
+			second = p
+			secondBet = p.TotalBet
+		}
+	}
+	_ = second
+	if top == nil || topBet <= secondBet {
+		return
+	}
+	refund := topBet - secondBet
+	top.Chips += refund
+	top.TotalBet -= refund
+	g.Pot -= refund
+}
+
+// endHandReset clears per-hand state after a hand concludes.
+func (g *Game) endHandReset() {
 	g.Stage = "waiting"
 	g.CurrentBet = 0
 	g.MinRaise = g.BigBlind
@@ -358,7 +452,6 @@ func (g *Game) resolveShowdown() {
 		p.Folded = !p.Connected || p.Chips <= 0 || p.SittingOut
 		p.AllIn = false
 	}
-	g.Room.onHandEndedLocked()
 }
 
 func (g *Game) buildShowdownPlayers(handValues map[string]HandValue) []ShowdownPlayer {
@@ -434,26 +527,16 @@ func (g *Game) buildSidePots() []SidePot {
 func (g *Game) awardPotToSingle() {
 	winner := g.singleActivePlayer()
 	if winner == nil {
-		g.Stage = "waiting"
+		g.endHandReset()
+		g.Room.onHandEndedLocked()
 		return
 	}
 	pot := g.Pot
 	winner.Chips += pot
 	g.Pot = 0
 	g.Room.LastEvent = &LastEvent{Kind: "win", PlayerID: winner.ID, Amount: pot}
-	g.Room.broadcastInfo(fmt.Sprintf("%s 赢得了底池", winner.Name))
-	g.Stage = "waiting"
-	for _, p := range g.Room.Seats {
-		if p == nil {
-			continue
-		}
-		p.Hole = nil
-		p.BetRound = 0
-		p.TotalBet = 0
-		p.Acted = false
-		p.AllIn = false
-		p.Folded = !p.Connected || p.Chips <= 0 || p.SittingOut
-	}
+	g.Room.queueInfoLocked(fmt.Sprintf("%s 赢得了底池", winner.Name))
+	g.endHandReset()
 	g.Room.onHandEndedLocked()
 }
 
@@ -475,9 +558,10 @@ func (g *Game) dealCard() Card {
 }
 
 func (g *Game) shuffle() {
-	g.rng.Shuffle(len(g.Deck), func(i, j int) {
+	for i := len(g.Deck) - 1; i > 0; i-- {
+		j := secureIntn(i + 1)
 		g.Deck[i], g.Deck[j] = g.Deck[j], g.Deck[i]
-	})
+	}
 }
 
 func (g *Game) postBlind(index int, amount int) int {
