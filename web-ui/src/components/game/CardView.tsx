@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useId, useMemo } from 'react'
 
 type Props = {
   code?: string | null
@@ -23,6 +23,7 @@ function parseCard(code: string) {
 export function CardView({ code, faceDown, className }: Props) {
   const isDown = faceDown || !code
   const { rank, suit, suitSymbol, color } = useMemo(() => parseCard(code ?? '??'), [code])
+  const shineId = useId().replace(/:/g, '')
   const fg = color === 'red' ? '#d92d20' : '#0b1118'
   const border = '#d0d7de'
   const bg = '#f8fafc'
@@ -40,7 +41,7 @@ export function CardView({ code, faceDown, className }: Props) {
         <div className="cardFace">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420">
             <defs>
-              <linearGradient id="shine" x1="0" x2="1" y1="0" y2="1">
+              <linearGradient id={shineId} x1="0" x2="1" y1="0" y2="1">
                 <stop offset="0" stopColor="rgba(255,255,255,0.55)" />
                 <stop offset="0.45" stopColor="rgba(255,255,255,0)" />
                 <stop offset="1" stopColor="rgba(255,255,255,0.15)" />
@@ -49,7 +50,7 @@ export function CardView({ code, faceDown, className }: Props) {
             <rect x="10" y="10" width="280" height="400" rx="26" fill={bg} stroke={border} strokeWidth="6" />
             <path
               d="M30 40 L120 40 C150 40 160 70 190 70 L270 70 L270 80 L190 80 C160 80 150 50 120 50 L30 50 Z"
-              fill="url(#shine)"
+              fill={`url(#${shineId})`}
               opacity="0.55"
             />
             <g fill={fg} fontFamily="system-ui, -apple-system, Segoe UI, sans-serif" fontWeight="900">

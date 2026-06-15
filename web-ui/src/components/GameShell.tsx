@@ -63,6 +63,7 @@ export function GameShell() {
   const [panelMode, setPanelMode] = useState<PanelMode>('room')
   const [profileOpen, setProfileOpen] = useState(false)
   const [username, setUsername] = useState(() => localStorage.getItem('username') ?? '')
+  const [password, setPassword] = useState('')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [roomCode, setRoomCode] = useState('')
@@ -83,26 +84,30 @@ export function GameShell() {
     return maxPlayers
   }, [maxPlayers, state?.maxPlayers])
 
-  useEffect(() => {
-    if (state?.roomCode) {
-      queueMicrotask(() => setOverlayOpen(false))
-    }
-  }, [state?.roomCode])
+  // Auto-collapse the room overlay once we are in a room. Adjust during render
+  // keyed on the room code instead of setState-in-effect.
+  const [lastRoomCode, setLastRoomCode] = useState<string | undefined>(undefined)
+  if (state?.roomCode && state.roomCode !== lastRoomCode) {
+    setLastRoomCode(state.roomCode)
+    setOverlayOpen(false)
+  }
 
-  useEffect(() => {
-    if (profile?.name) {
-      queueMicrotask(() => {
-        setPlayerName(profile.name)
-        setProfileName(profile.name)
-      })
-    }
-  }, [profile?.name])
+  // Seed the editable name inputs from the profile only once (when still empty),
+  // so a server profile push does not clobber what the user is typing.
+  const [nameSeeded, setNameSeeded] = useState(false)
+  if (!nameSeeded && profile?.name) {
+    setNameSeeded(true)
+    if (!playerName) setPlayerName(profile.name)
+    if (!profileName) setProfileName(profile.name)
+  }
 
-  useEffect(() => {
-    if (showdown) {
-      queueMicrotask(() => setShowSettlement(true))
-    }
-  }, [showdown])
+  // Re-open the settlement panel whenever a new showdown arrives. Adjust during
+  // render (keyed on the showdown object) instead of setState-in-effect.
+  const [settlementKey, setSettlementKey] = useState<ShowdownPayload | null>(null)
+  if (showdown !== settlementKey) {
+    setSettlementKey(showdown)
+    setShowSettlement(true)
+  }
 
   useEffect(() => {
     if (!profileOpen) return
@@ -121,13 +126,14 @@ export function GameShell() {
   const canSubmit = playerName.trim().length > 0
   const isAuthed = authState === 'authenticated'
   const profileId = profile?.id ?? getStoredProfileId()
-  const canAuth = username.trim().length > 0
+  const canAuth = username.trim().length > 0 && password.length >= 4
 
   const submitAuth = () => {
     if (!canAuth) return
     localStorage.setItem('username', username.trim())
     api.login({
       username: username.trim(),
+      password,
     })
   }
 
@@ -165,6 +171,18 @@ export function GameShell() {
                 }}
               />
             </label>
+            <label className="field loginField">
+              <div className="label">密码</div>
+              <input
+                value={password}
+                type="password"
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="至少 4 位，新用户名将自动注册"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitAuth()
+                }}
+              />
+            </label>
             <button
               className="btn primary wide loginButton"
               disabled={!canAuth || authState === 'authenticating'}
@@ -196,7 +214,7 @@ export function GameShell() {
         </div>
         <div className="hudRight">
           <div className={`hudStatus ${connectionState}`}>{connectionState}</div>
-          <button className="btn tiny secondary" onClick={() => connect()}>
+          <button className="btn tiny secondary" onClick={() => { void connect().catch(() => {}) }}>
             连接
           </button>
           <div className="profileMenuAnchor" ref={profileMenuRef}>
@@ -252,6 +270,8 @@ export function GameShell() {
               youHole={state?.you.hole ?? []}
               lastEvent={state?.lastEvent ?? null}
               hostId={state?.hostId}
+              actionDeadline={state?.actionDeadline}
+              serverTime={state?.serverTime}
               onKickPlayer={(player) => {
                 if (window.confirm(`确认将 ${player.name} 移出房间？`)) {
                   api.kickPlayer(player.id)

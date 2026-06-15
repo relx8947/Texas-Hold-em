@@ -32,6 +32,8 @@ function storageKey(roomCode: string) {
 const profileStorageKey = 'playerProfileId'
 
 function defaultServerUrl() {
+  const fromEnv = import.meta.env?.VITE_WS_URL
+  if (fromEnv) return fromEnv
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${location.host}/ws`
 }
@@ -65,8 +67,20 @@ export function usePokerClient() {
   const manualCloseRef = useRef(false)
   const restoringRef = useRef(false)
   const connectRef = useRef<(() => Promise<void>) | null>(null)
+  const lastSeqRef = useRef(0)
+  const lastHandRef = useRef(0)
 
-  const [serverUrl, setServerUrl] = useState<string>(defaultServerUrl)
+  const [serverUrl, setServerUrlState] = useState<string>(
+    () => localStorage.getItem('serverUrl') || defaultServerUrl(),
+  )
+  const setServerUrl = useCallback((url: string) => {
+    setServerUrlState(url)
+    if (url && url !== defaultServerUrl()) {
+      localStorage.setItem('serverUrl', url)
+    } else {
+      localStorage.removeItem('serverUrl')
+    }
+  }, [])
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('disconnected')
   const [authState, setAuthState] = useState<AuthState>('anonymous')
@@ -91,8 +105,8 @@ export function usePokerClient() {
     (msg: WSMessage) => {
       switch (msg.type) {
         case 'rooms_list': {
-          const payload = msg.payload as { rooms: RoomSummary[] }
-          setRooms(payload.rooms ?? [])
+          const payload = msg.payload as { rooms?: RoomSummary[] }
+          setRooms(Array.isArray(payload?.rooms) ? payload.rooms : [])
           return
         }
         case 'room_created': {
@@ -156,12 +170,24 @@ export function usePokerClient() {
         }
         case 'state': {
           const payload = msg.payload as StatePayload
+          // Drop stale/out-of-order snapshots (e.g. buffered after a reconnect).
+          if (typeof payload.stateSeq === 'number') {
+            if (payload.stateSeq <= lastSeqRef.current) {
+              return
+            }
+            lastSeqRef.current = payload.stateSeq
+          }
+          // A new hand started: clear the previous hand's settlement overlay.
+          if (typeof payload.handId === 'number' && payload.handId !== lastHandRef.current) {
+            lastHandRef.current = payload.handId
+            setShowdown(null)
+          }
           setState(payload)
           return
         }
         case 'chat_history': {
-          const payload = msg.payload as { messages: ChatMessage[] }
-          setChat(payload.messages ?? [])
+          const payload = msg.payload as { messages?: ChatMessage[] }
+          setChat(Array.isArray(payload?.messages) ? payload.messages : [])
           return
         }
         case 'chat': {
@@ -179,10 +205,12 @@ export function usePokerClient() {
           return
         }
         case 'error': {
-          const payload = msg.payload as { message: string }
+          const payload = msg.payload as { message: string; code?: string }
           setAuthState((current) => current === 'authenticating' ? 'anonymous' : current)
           log(`错误：${payload.message}`)
-          if (restoringRef.current || payload.message === '房间不存在') {
+          // Prefer the structured code; fall back to the legacy message text.
+          const roomGone = payload.code === 'room_not_found' || payload.message === '房间不存在'
+          if (restoringRef.current || roomGone) {
             restoringRef.current = false
             roomSessionRef.current = null
             setState(null)
@@ -220,7 +248,10 @@ export function usePokerClient() {
 
   const scheduleReconnect = useCallback(() => {
     if (manualCloseRef.current || reconnectTimerRef.current !== null) return
-    const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 8000)
+    // Cap attempts and add jitter to avoid synchronized reconnect storms.
+    const attempt = Math.min(reconnectAttemptsRef.current, 5)
+    const base = Math.min(1000 * 2 ** attempt, 8000)
+    const delay = base + Math.floor(Math.random() * 400)
     reconnectAttemptsRef.current += 1
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null
@@ -248,6 +279,9 @@ export function usePokerClient() {
       ws.onopen = () => {
         setConnectionState('connected')
         reconnectAttemptsRef.current = 0
+        // Reset sequence tracking: the server's StateSeq restarts per process,
+        // so a reconnect should accept the next snapshot regardless of value.
+        lastSeqRef.current = 0
         clearReconnectTimer()
         log('已连接服务器')
         resolve()
@@ -295,7 +329,7 @@ export function usePokerClient() {
       const msg: WSMessage = { type, payload }
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         if (!queueableMessageTypes.has(type)) {
-          log('连接未恢复，操作未发送')
+          log('连接已断开，本次操作未发送，正在重连，请稍后重试')
           connect().catch(() => log('无法连接服务器'))
           return
         }
