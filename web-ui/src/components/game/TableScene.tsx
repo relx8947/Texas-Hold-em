@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import './game.css'
 import type { LastEvent, PublicPlayer } from '../../protocol'
 import { CardView } from './CardView'
@@ -52,13 +53,36 @@ export function TableScene({
   onKickPlayer,
   hostId,
 }: Props) {
+  const [dismissedFoldKey, setDismissedFoldKey] = useState<string | null>(null)
+
   const pos = seatPositions(maxPlayers)
   const bySeat = new Map<number, PublicPlayer>()
   for (const p of players) bySeat.set(p.seat, p)
+  const activeFoldEvent =
+    lastEvent?.kind === 'action' && lastEvent.action === 'fold' && lastEvent.seat !== undefined
+      ? {
+          seat: lastEvent.seat,
+          name: players.find((player) => player.seat === lastEvent.seat)?.name ?? null,
+          key: `${lastEvent.playerId ?? 'seat'}-${lastEvent.seat}`,
+        }
+      : null
+  const showFoldFeedback = !!activeFoldEvent && activeFoldEvent.key !== dismissedFoldKey
 
   return (
     <div className="tableStage">
       <div className="tableCenter">
+        {activeFoldEvent && showFoldFeedback ? (
+          <div
+            className="tableNotice fold"
+            key={`fold-${activeFoldEvent.key}`}
+            onAnimationEnd={() => setDismissedFoldKey(activeFoldEvent.key)}
+          >
+            <span className="tableNoticeLabel">弃牌</span>
+            <span className="tableNoticeText">
+              {activeFoldEvent.name ? `${activeFoldEvent.name} 已弃牌` : `座位 ${activeFoldEvent.seat + 1} 已弃牌`}
+            </span>
+          </div>
+        ) : null}
         <div className="communityRow">
           {Array.from({ length: 5 }).map((_, idx) => (
             community[idx] ? (
@@ -130,6 +154,12 @@ export function TableScene({
             y={p.y}
             cards={cards}
             bubble={bubble}
+            foldHighlight={showFoldFeedback && activeFoldEvent?.seat === seatIndex}
+            recentFoldName={
+              showFoldFeedback && activeFoldEvent?.seat === seatIndex
+                ? (player?.name ?? `座位 ${seatIndex + 1}`)
+                : null
+            }
             isHost={!!player && player.id === hostId}
             canKick={!!player && hostId === youId && player.id !== youId}
             onKick={onKickPlayer}
