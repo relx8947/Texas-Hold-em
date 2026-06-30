@@ -7,13 +7,14 @@ type Props = {
   label: string
   x: number
   y: number
+  compact?: boolean
   cards?: { code: string | null; faceDown: boolean }[]
   bubble?: string | null
   foldHighlight?: boolean
   recentFoldName?: string | null
   isHost?: boolean
   canKick?: boolean
-  onKick?: (player: PublicPlayer) => void
+  onOpenActions?: (player: PublicPlayer) => void
 }
 
 export function SeatView({
@@ -21,18 +22,21 @@ export function SeatView({
   label,
   x,
   y,
+  compact,
   cards,
   bubble,
   foldHighlight,
   recentFoldName,
   isHost,
   canKick,
-  onKick,
+  onOpenActions,
 }: Props) {
   const classes = ['seat']
   if (player?.current) classes.push('current')
   if (player?.folded) classes.push('folded')
   if (foldHighlight) classes.push('foldFlash')
+  if (compact) classes.push('compact')
+  if (canKick) classes.push('interactive')
   const emptySeatLabel = label.replace('座位 ', '')
 
   return (
@@ -84,7 +88,7 @@ export function SeatView({
       {player?.folded ? <div className="foldBanner">本轮已弃牌</div> : null}
       {foldHighlight && recentFoldName ? <div className="foldBurst">× {recentFoldName} 弃牌</div> : null}
       {player && canKick ? (
-        <button className="seatKick" onClick={() => onKick?.(player)}>
+        <button className="seatKick" onClick={() => onOpenActions?.(player)}>
           踢人
         </button>
       ) : null}

@@ -16,13 +16,20 @@
   --hl-green-deep: #1c8b4a;
   --hl-cream: #fff4d6;
   --hl-ink: #5a2a12;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+html {
+  height: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   height: 100%;
-  overflow: hidden;
   background:
     radial-gradient(900px 500px at 50% -10%, rgba(244, 206, 100, 0.16), transparent 52%),
     linear-gradient(180deg, #163730 0%, #0b1d1c 100%);
@@ -31,11 +38,11 @@ body {
 
 #root {
   height: 100%;
-  overflow: hidden;
 }
 
 button {
   font-family: inherit;
+  touch-action: manipulation;
 }
 
 /* 滚动条美化 */

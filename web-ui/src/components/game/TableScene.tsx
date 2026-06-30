@@ -14,16 +14,16 @@ type Props = {
   youId?: string
   youHole?: string[]
   lastEvent?: LastEvent | null
-  onKickPlayer?: (player: PublicPlayer) => void
+  onOpenSeatActions?: (player: PublicPlayer) => void
   hostId?: string
 }
 
-function seatPositions(maxPlayers: number) {
+function seatPositions(maxPlayers: number, compact = false) {
   const positions: { x: number; y: number }[] = []
   const cx = 50
-  const cy = 52
-  const rx = 44
-  const ry = 34
+  const cy = compact ? 54 : 52
+  const rx = compact ? 42 : 44
+  const ry = compact ? 31 : 34
 
   for (let i = 0; i < maxPlayers; i++) {
     const t = (Math.PI * 2 * i) / maxPlayers
@@ -50,12 +50,13 @@ export function TableScene({
   youId,
   youHole,
   lastEvent,
-  onKickPlayer,
+  onOpenSeatActions,
   hostId,
 }: Props) {
   const [dismissedFoldKey, setDismissedFoldKey] = useState<string | null>(null)
 
-  const pos = seatPositions(maxPlayers)
+  const compactTable = maxPlayers >= 6
+  const pos = seatPositions(maxPlayers, compactTable)
   const bySeat = new Map<number, PublicPlayer>()
   for (const p of players) bySeat.set(p.seat, p)
   const activeFoldEvent =
@@ -152,6 +153,7 @@ export function TableScene({
             label={`座位 ${seatIndex + 1}`}
             x={p.x}
             y={p.y}
+            compact={compactTable}
             cards={cards}
             bubble={bubble}
             foldHighlight={showFoldFeedback && activeFoldEvent?.seat === seatIndex}
@@ -162,7 +164,7 @@ export function TableScene({
             }
             isHost={!!player && player.id === hostId}
             canKick={!!player && hostId === youId && player.id !== youId}
-            onKick={onKickPlayer}
+            onOpenActions={onOpenSeatActions}
           />
         )
       })}

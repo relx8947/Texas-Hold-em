@@ -35,6 +35,14 @@
   z-index: 10;
 }
 
+.seat.compact {
+  width: 104px;
+}
+
+.seat.interactive {
+  cursor: pointer;
+}
+
 .seatCards {
   position: absolute;
   top: -60px;
@@ -809,4 +817,227 @@
   font-weight: 800;
   min-width: 40px;
   text-align: right;
+}
+
+@media (hover: none) {
+  .seatKick {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 760px) {
+  .tableStage {
+    width: min(100%, 760px);
+    aspect-ratio: 1 / 1.12;
+    border-width: 5px;
+    outline-width: 1.5px;
+    box-shadow:
+      0 14px 32px rgba(80, 9, 12, 0.34),
+      inset 0 0 52px rgba(0, 0, 0, 0.26),
+      0 0 0 6px rgba(184, 29, 29, 0.34);
+  }
+
+  .tableCenter {
+    top: 46%;
+    width: 72%;
+    gap: 10px;
+  }
+
+  .communityRow {
+    gap: 5px;
+    height: auto;
+    min-height: 72px;
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .potChip {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .cardFlip,
+  .cardBack,
+  .cardSlot {
+    width: 44px;
+    height: 62px;
+    border-radius: 7px;
+  }
+
+  .seat {
+    width: 92px;
+    gap: 6px;
+  }
+
+  .seat.compact {
+    width: 84px;
+  }
+
+  .seatCards {
+    top: -48px;
+    gap: 2px;
+  }
+
+  .seatCards .cardFlip,
+  .seatCards .cardBack {
+    width: 36px;
+    height: 52px;
+    border-radius: 5px;
+  }
+
+  .avatarRing {
+    width: 52px;
+    height: 52px;
+    padding: 2px;
+  }
+
+  .seat.current .avatarRing {
+    box-shadow: 0 0 0 3px var(--hl-gold), 0 0 18px rgba(255, 215, 94, 0.7);
+  }
+
+  .dealerBadge {
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
+  }
+
+  .hostBadge {
+    min-width: 28px;
+    height: 17px;
+    padding: 0 5px;
+    font-size: 9px;
+  }
+
+  .seatInfo {
+    margin-top: -8px;
+  }
+
+  .namePill,
+  .chipsPill {
+    max-width: 84px;
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+
+  .betTag {
+    top: 32px;
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+
+  .statusTag {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .foldBanner {
+    top: -72px;
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .foldBurst {
+    top: -92px;
+    font-size: 9px;
+    padding: 5px 9px;
+  }
+
+  .tableNotice {
+    max-width: calc(100% - 16px);
+    gap: 7px;
+    padding: 6px 10px;
+  }
+
+  .tableNoticeLabel {
+    min-width: 40px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+
+  .tableNoticeText {
+    white-space: normal;
+    text-align: center;
+    font-size: 11px;
+  }
+
+  .actionBubble {
+    top: -34px;
+    padding: 5px 9px;
+    border-radius: 10px;
+    font-size: 10px;
+  }
+
+  .actionBar {
+    border-radius: 18px;
+    padding: 12px;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .actionLeft,
+  .actionRight {
+    width: 100%;
+  }
+
+  .actionRight {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .actionRight > .btn {
+    min-height: 46px;
+    width: 100%;
+  }
+
+  .actionInfo .title {
+    font-size: 15px;
+  }
+
+  .actionInfo .meta {
+    font-size: 11px;
+  }
+
+  .raiseBox {
+    grid-column: 1 / -1;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .quickRow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    justify-content: stretch;
+  }
+
+  .quickRow .btn {
+    min-height: 40px;
+    width: 100%;
+  }
+
+  .sliderRow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    justify-items: stretch;
+    padding: 10px;
+  }
+
+  .sliderRow input[type='range'] {
+    width: 100%;
+  }
+
+  .valuePill {
+    min-width: 0;
+    text-align: center;
+  }
+
+  .sliderRow .btn {
+    min-height: 44px;
+    width: 100%;
+  }
 }
