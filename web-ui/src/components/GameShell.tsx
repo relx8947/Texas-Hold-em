@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActionBar } from './game/ActionBar'
 import { TableScene } from './game/TableScene'
 import { PlayerAvatar } from './PlayerAvatar'
-import type { HandHistoryEntry, ShowdownPayload } from '../protocol'
+import type { HandHistoryEntry, PublicPlayer, ShowdownPayload } from '../protocol'
 import { getStoredPlayerId, getStoredProfileId, usePokerClient } from '../usePokerClient'
 import './GameShell.css'
 
 type OverlayMode = 'create' | 'join'
 type PanelMode = 'room' | 'logs'
+type ActiveSheet = 'room' | 'profile' | 'seat' | null
 
 function formatCards(cards: string[]) {
   return cards.map((card) => card.replace('T', '10')).join(' ')
@@ -123,11 +124,10 @@ function HistoryPanel({ history, onClose }: { history: HandHistoryEntry[]; onClo
 
 export function GameShell() {
   const { serverUrl, setServerUrl, connectionState, authState, state, rooms, logs, showdown, profile, history, toast, dismissToast, connect, api } = usePokerClient()
-  const profileMenuRef = useRef<HTMLDivElement | null>(null)
-  const [overlayOpen, setOverlayOpen] = useState(true)
   const [mode, setMode] = useState<OverlayMode>('create')
   const [panelMode, setPanelMode] = useState<PanelMode>('room')
-  const [profileOpen, setProfileOpen] = useState(false)
+  const [activeSheet, setActiveSheet] = useState<ActiveSheet>('room')
+  const [selectedSeatPlayer, setSelectedSeatPlayer] = useState<PublicPlayer | null>(null)
   const [username, setUsername] = useState(() => localStorage.getItem('username') ?? '')
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('playerName') ?? '')
   const [profileName, setProfileName] = useState(() => localStorage.getItem('playerName') ?? '')
@@ -153,13 +153,13 @@ export function GameShell() {
     return maxPlayers
   }, [maxPlayers, state?.maxPlayers])
 
-  // Auto-collapse the room overlay once we are in a room. Adjust during render
-  // keyed on the room code instead of setState-in-effect.
-  const [lastRoomCode, setLastRoomCode] = useState<string | undefined>(undefined)
-  if (state?.roomCode && state.roomCode !== lastRoomCode) {
-    setLastRoomCode(state.roomCode)
-    setOverlayOpen(false)
-  }
+  useEffect(() => {
+    if (state?.roomCode) {
+      queueMicrotask(() => {
+        setActiveSheet((current) => (current === 'room' ? null : current))
+      })
+    }
+  }, [state?.roomCode])
 
   // Seed the editable name inputs from the profile only once (when still empty),
   // so a server profile push does not clobber what the user is typing.
@@ -169,28 +169,6 @@ export function GameShell() {
     if (!playerName) setPlayerName(profile.name)
     if (!profileName) setProfileName(profile.name)
   }
-
-  // Re-open the settlement panel whenever a new showdown arrives. Adjust during
-  // render (keyed on the showdown object) instead of setState-in-effect.
-  const [settlementKey, setSettlementKey] = useState<ShowdownPayload | null>(null)
-  if (showdown !== settlementKey) {
-    setSettlementKey(showdown)
-    setShowSettlement(true)
-  }
-
-  useEffect(() => {
-    if (!profileOpen) return
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Node)) return
-      if (profileMenuRef.current?.contains(target)) return
-      setProfileOpen(false)
-    }
-
-    window.addEventListener('pointerdown', handlePointerDown)
-    return () => window.removeEventListener('pointerdown', handlePointerDown)
-  }, [profileOpen])
 
   useEffect(() => {
     if (!toast) return
@@ -244,10 +222,29 @@ export function GameShell() {
     }
   }, [isYourTurn])
 
-  const canSubmit = playerName.trim().length > 0
+  useEffect(() => {
+    if (showdown) {
+      queueMicrotask(() => {
+        setShowSettlement(true)
+        setActiveSheet(null)
+        setSelectedSeatPlayer(null)
+      })
+    }
+  }, [showdown])
+
+  const resolvedPlayerName = (profile?.name ?? playerName).trim()
+  const canSubmit = resolvedPlayerName.length > 0
   const isAuthed = authState === 'authenticated'
   const profileId = profile?.id ?? getStoredProfileId()
   const canAuth = username.trim().length > 0
+  const seatSheetPlayer =
+    activeSheet === 'seat' && selectedSeatPlayer
+      ? (state?.players.find((player) => player.id === selectedSeatPlayer.id) ?? null)
+      : null
+  const resolvedActiveSheet = activeSheet === 'seat' && !seatSheetPlayer ? null : activeSheet
+  const isRoomSheetOpen = resolvedActiveSheet === 'room'
+  const isProfileSheetOpen = resolvedActiveSheet === 'profile'
+  const isSeatSheetOpen = resolvedActiveSheet === 'seat' && !!seatSheetPlayer
 
   const submitAuth = () => {
     if (!canAuth) return
@@ -255,6 +252,33 @@ export function GameShell() {
     api.login({
       username: username.trim(),
     })
+  }
+
+  const closeSheets = () => {
+    setActiveSheet(null)
+    setSelectedSeatPlayer(null)
+  }
+
+  const toggleRoomSheet = () => {
+    setSelectedSeatPlayer(null)
+    setActiveSheet((current) => (current === 'room' ? null : 'room'))
+  }
+
+  const toggleProfileSheet = () => {
+    setSelectedSeatPlayer(null)
+    setActiveSheet((current) => (current === 'profile' ? null : 'profile'))
+  }
+
+  const openSeatActions = (player: PublicPlayer) => {
+    setSelectedSeatPlayer(player)
+    setActiveSheet('seat')
+  }
+
+  const kickPlayer = (player: PublicPlayer) => {
+    if (window.confirm(`确认将 ${player.name} 移出房间？`)) {
+      api.kickPlayer(player.id)
+      closeSheets()
+    }
   }
 
   if (!isAuthed) {
@@ -316,14 +340,14 @@ export function GameShell() {
             <div className="hudPill"><span>房间</span><strong>{roomLabel}</strong></div>
             <div className="hudPill"><span>阶段</span><strong>{stageLabel}</strong></div>
             <div className="hudPill"><span>底池</span><strong>{potValue}</strong></div>
-            <div className="hudPill"><span>手数</span><strong>{handId}</strong></div>
+            <div className="hudPill secondaryInfo"><span>手数</span><strong>{handId}</strong></div>
             {state?.tournament ? (
               <div className="hudPill tournamentPill">
                 <span>盲注 L{(state.blindLevel ?? 0) + 1}</span>
                 <strong>{state.smallBlind}/{state.bigBlind}{state.handsToBlindUp ? ` · ${state.handsToBlindUp}手升盲` : ''}</strong>
               </div>
             ) : null}
-            <div className="hudPill"><span>总筹码</span><strong>{profile?.chips ?? '...'}</strong></div>
+            <div className="hudPill secondaryInfo"><span>总筹码</span><strong>{profile?.chips ?? '...'}</strong></div>
           </div>
         </div>
         <div className="hudRight">
@@ -345,46 +369,23 @@ export function GameShell() {
           >
             战绩
           </button>
-          <div className="profileMenuAnchor" ref={profileMenuRef}>
-            <button
-              className={`profileTrigger ${profileOpen ? 'open' : ''}`}
-              onClick={() => setProfileOpen((value) => !value)}
-              aria-label="打开个人信息"
-              aria-expanded={profileOpen}
-            >
-              <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
-            </button>
-            {profileOpen ? (
-              <div className="profilePopover">
-                <div className="profileCard profileCardPopover">
-                  <div className="profileAvatarSeed">
-                    <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
-                  </div>
-                  <div>
-                    <div className="profileName">{profile?.name ?? (playerName || '玩家')}</div>
-                    <div className="profileMeta">ID {profileId || '未生成'} · 总筹码 {profile?.chips ?? 0} · 战绩 {profile?.handsWon ?? 0}/{profile?.handsPlayed ?? 0}</div>
-                  </div>
-                </div>
-                <label className="field">
-                  <div className="label">昵称</div>
-                  <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="请输入昵称" />
-                </label>
-                <button
-                  className="btn primary wide"
-                  onClick={() => api.updateProfile({ playerId: profileId, name: profileName.trim() })}
-                >
-                  保存昵称
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <button className="btn tiny" onClick={() => setOverlayOpen((v) => !v)}>
+          <button
+            className={`profileTrigger ${isProfileSheetOpen ? 'open' : ''}`}
+            onClick={toggleProfileSheet}
+            aria-label="打开个人信息"
+            aria-expanded={isProfileSheetOpen}
+          >
+            <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? playerName} label="玩家" />
+          </button>
+          <button className="btn tiny" onClick={toggleRoomSheet}>
             房间
           </button>
         </div>
       </header>
 
-      <div className={`gameLayout ${overlayOpen ? 'panelOpen' : ''}`}>
+      {resolvedActiveSheet ? <button className="sheetBackdrop" aria-label="关闭面板" onClick={closeSheets} /> : null}
+
+      <div className={`gameLayout ${isRoomSheetOpen ? 'panelOpen' : ''}`}>
         <main className="gameStage">
           {state && state.spectators && state.spectators.length > 0 ? (
             <div className="spectatorStrip" title="观战玩家">
@@ -408,11 +409,7 @@ export function GameShell() {
               hostId={state?.hostId}
               actionDeadline={state?.actionDeadline}
               serverTime={state?.serverTime}
-              onKickPlayer={(player) => {
-                if (window.confirm(`确认将 ${player.name} 移出房间？`)) {
-                  api.kickPlayer(player.id)
-                }
-              }}
+              onOpenSeatActions={openSeatActions}
             />
           </div>
           <div className="actionDock">
@@ -433,17 +430,17 @@ export function GameShell() {
               <div className="actionBar actionBarIdle">
                 <div className="actionInfo">
                   <div className="title">请创建或加入房间</div>
-                  <div className="meta">右上角打开房间面板，或点击“连接”</div>
+                  <div className="meta">点击右上角“房间”打开抽屉，或先点击“连接”</div>
                 </div>
               </div>
             )}
           </div>
         </main>
 
-        <aside className={`roomOverlay ${overlayOpen ? 'open' : ''}`}>
+        <aside className={`roomOverlay ${isRoomSheetOpen ? 'open' : ''}`}>
           <div className="overlayHeader">
             <div className="overlayTitle">{panelMode === 'room' ? '房间操作' : '消息记录'}</div>
-            <button className="btn tiny secondary" onClick={() => setOverlayOpen(false)}>
+            <button className="btn tiny secondary" onClick={closeSheets}>
               收起
             </button>
           </div>
@@ -544,7 +541,7 @@ export function GameShell() {
                   disabled={!canSubmit}
                   onClick={() => {
                     api.createRoom({
-                      playerName: playerName.trim(),
+                      playerName: resolvedPlayerName,
                       playerId: '',
                       profileId,
                       roomName: roomName.trim(),
@@ -585,7 +582,7 @@ export function GameShell() {
                   onClick={() => {
                     const code = roomCode.trim().toUpperCase()
                     api.joinRoom({
-                      playerName: playerName.trim(),
+                      playerName: resolvedPlayerName,
                       roomCode: code,
                       playerId: getStoredPlayerId(code),
                       profileId,
@@ -602,7 +599,7 @@ export function GameShell() {
                   onClick={() => {
                     const code = roomCode.trim().toUpperCase()
                     api.joinRoom({
-                      playerName: playerName.trim(),
+                      playerName: resolvedPlayerName,
                       roomCode: code,
                       playerId: getStoredPlayerId(code),
                       profileId,
@@ -625,11 +622,14 @@ export function GameShell() {
                 <button
                   key={room.code}
                   className="miniRoom"
+                  title={room.locked ? '该房间已加锁，已为你填入房间号，请输入密码后点击“加入房间”' : '点击直接加入房间'}
                   onClick={() => {
+                    setMode('join')
                     setRoomCode(room.code)
-                    if (!room.locked) {
+                    if (room.locked) return
+                    if (resolvedPlayerName) {
                       api.joinRoom({
-                        playerName: playerName.trim(),
+                        playerName: resolvedPlayerName,
                         roomCode: room.code,
                         playerId: getStoredPlayerId(room.code),
                         profileId,
@@ -702,10 +702,67 @@ export function GameShell() {
         </div>
       ) : null}
 
+      {isProfileSheetOpen ? (
+        <section className="floatingSheet profileSheet">
+          <div className="sheetHeader">
+            <div>
+              <div className="sheetKicker">Profile</div>
+              <div className="sheetTitle">个人资料</div>
+            </div>
+            <button className="btn tiny secondary" onClick={closeSheets}>
+              关闭
+            </button>
+          </div>
+          <div className="profileCard">
+            <div className="profileAvatarSeed">
+              <PlayerAvatar seed={profile?.avatarSeed ?? profileId} name={profile?.name ?? resolvedPlayerName} label="玩家" />
+            </div>
+            <div>
+              <div className="profileName">{profile?.name ?? (resolvedPlayerName || '玩家')}</div>
+              <div className="profileMeta">ID {profileId || '未生成'} · 总筹码 {profile?.chips ?? 0} · 战绩 {profile?.handsWon ?? 0}/{profile?.handsPlayed ?? 0}</div>
+            </div>
+          </div>
+          <label className="field">
+            <div className="label">昵称</div>
+            <input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="请输入昵称" />
+          </label>
+          <button
+            className="btn primary wide"
+            onClick={() => {
+              api.updateProfile({ playerId: profileId, name: profileName.trim() })
+              closeSheets()
+            }}
+          >
+            保存昵称
+          </button>
+        </section>
+      ) : null}
+
+      {isSeatSheetOpen && seatSheetPlayer ? (
+        <section className="floatingSheet seatActionSheet">
+          <div className="sheetHeader">
+            <div>
+              <div className="sheetKicker">Seat</div>
+              <div className="sheetTitle">{seatSheetPlayer.name}</div>
+            </div>
+            <button className="btn tiny secondary" onClick={closeSheets}>
+              关闭
+            </button>
+          </div>
+          <div className="seatActionMeta">
+            座位 {seatSheetPlayer.seat + 1} · 筹码 {seatSheetPlayer.chips} · {seatSheetPlayer.connected ? '在线' : '离线'}
+          </div>
+          <div className="seatActionButtons">
+            <button className="btn danger wide" onClick={() => kickPlayer(seatSheetPlayer)}>
+              踢出玩家
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {showdown && showSettlement ? <SettlementPanel showdown={showdown} onClose={() => setShowSettlement(false)} /> : null}
 
       {historyOpen ? <HistoryPanel history={history} onClose={() => setHistoryOpen(false)} /> : null}
-
     </div>
   )
 }

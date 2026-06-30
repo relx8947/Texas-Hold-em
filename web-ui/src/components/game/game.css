@@ -35,6 +35,14 @@
   z-index: 10;
 }
 
+.seat.compact {
+  width: 104px;
+}
+
+.seat.interactive {
+  cursor: pointer;
+}
+
 .seatCards {
   position: absolute;
   top: -60px;
@@ -42,11 +50,21 @@
   gap: 4px;
   align-items: center;
   justify-content: center;
-  transition: transform 0.2s;
+  transition: transform 220ms ease, opacity 220ms ease, filter 220ms ease;
 }
 
 .seat.current .seatCards {
   transform: translateY(-5px);
+}
+
+.seat.folded .seatCards {
+  transform: translateY(14px) rotate(-8deg);
+  opacity: 0.18;
+  filter: grayscale(0.9);
+}
+
+.seat.current.folded .seatCards {
+  transform: translateY(10px) rotate(-8deg);
 }
 
 .seatCards .cardFlip,
@@ -277,9 +295,10 @@
 }
 
 .statusTag.fold {
-  background: rgba(0, 0, 0, 0.7);
-  color: #aaa;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(180deg, rgba(63, 16, 16, 0.92), rgba(23, 6, 6, 0.92));
+  color: #ffd8b2;
+  border: 1px solid rgba(255, 185, 124, 0.45);
+  box-shadow: 0 0 14px rgba(120, 23, 23, 0.45);
 }
 
 .statusTag.ready {
@@ -305,6 +324,108 @@
 .seat.folded {
   opacity: 0.6;
   filter: grayscale(0.8);
+}
+
+.seat.foldFlash {
+  animation: foldSeatFlash 820ms cubic-bezier(0.18, 0.88, 0.32, 1);
+}
+
+.seat.foldFlash::before {
+  content: '';
+  position: absolute;
+  inset: -18px -14px -24px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 219, 181, 0.72), rgba(165, 22, 16, 0.28) 42%, rgba(65, 8, 8, 0) 72%);
+  filter: blur(8px);
+  pointer-events: none;
+  z-index: 1;
+  animation: foldShockwave 820ms cubic-bezier(0.14, 0.8, 0.3, 1);
+}
+
+.seat.foldFlash .seatMain {
+  animation: foldSeatDip 820ms cubic-bezier(0.18, 0.88, 0.32, 1);
+  z-index: 3;
+}
+
+.seat.foldFlash .seatCards {
+  animation: foldCardsDrop 820ms cubic-bezier(0.22, 0.84, 0.28, 1);
+  z-index: 4;
+}
+
+.foldBanner {
+  position: absolute;
+  top: -84px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(79, 12, 12, 0.96), rgba(38, 7, 7, 0.96));
+  border: 1px solid rgba(255, 193, 139, 0.55);
+  color: #ffe2bf;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.36);
+  text-transform: uppercase;
+  animation: foldBannerIn 220ms ease-out;
+  pointer-events: none;
+  z-index: 22;
+}
+
+.foldBurst {
+  position: absolute;
+  top: -112px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 236, 215, 0.98), rgba(255, 196, 139, 0.92));
+  border: 1px solid rgba(133, 31, 18, 0.28);
+  color: #7b190e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  box-shadow: 0 10px 24px rgba(60, 7, 7, 0.34);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 35;
+  animation: foldBurstIn 900ms cubic-bezier(0.16, 0.84, 0.28, 1);
+}
+
+.tableNotice {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 235, 213, 0.55);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(6px);
+  animation: tableNoticeIn 260ms ease-out;
+}
+
+.tableNotice.fold {
+  background: linear-gradient(180deg, rgba(114, 20, 20, 0.86), rgba(43, 9, 9, 0.92));
+  color: #ffe7ca;
+}
+
+.tableNoticeLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 230, 191, 0.14);
+  border: 1px solid rgba(255, 227, 193, 0.3);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.tableNoticeText {
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .tableCenter {
@@ -434,6 +555,109 @@
   }
 }
 
+@keyframes foldSeatFlash {
+  0% {
+    filter: saturate(1.05);
+  }
+
+  30% {
+    filter: saturate(1.2) brightness(1.08);
+  }
+
+  100% {
+    filter: saturate(1) brightness(1);
+  }
+}
+
+@keyframes foldShockwave {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+
+  24% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.26);
+  }
+}
+
+@keyframes foldSeatDip {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+
+  35% {
+    transform: translateY(8px) scale(0.97);
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes foldCardsDrop {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+
+  45% {
+    transform: translateY(20px) rotate(-10deg);
+    opacity: 0.28;
+  }
+
+  100% {
+    transform: translateY(14px) rotate(-8deg);
+    opacity: 0.18;
+  }
+}
+
+@keyframes foldBannerIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes foldBurstIn {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.88);
+  }
+
+  22% {
+    opacity: 1;
+    transform: translateY(0) scale(1.04);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+}
+
+@keyframes tableNoticeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes potPulse {
   0% {
     transform: scale(1);
@@ -490,6 +714,12 @@
   z-index: 30;
 }
 
+.seat.foldFlash .actionBubble {
+  background: linear-gradient(180deg, #6c1616, #2d0707);
+  color: #ffe3c2;
+  box-shadow: 0 10px 22px rgba(69, 10, 10, 0.45);
+}
+
 .actionBubble::after {
   content: '';
   position: absolute;
@@ -499,6 +729,27 @@
   width: 8px;
   height: 8px;
   background: #fff;
+}
+
+.seat.foldFlash .actionBubble::after {
+  background: #2d0707;
+}
+
+@media (max-width: 900px) {
+  .tableNotice {
+    padding: 7px 12px;
+    gap: 8px;
+  }
+
+  .tableNoticeText {
+    font-size: 12px;
+  }
+
+  .foldBurst {
+    top: -100px;
+    font-size: 10px;
+    padding: 5px 10px;
+  }
 }
 
 .actionBar {
@@ -732,4 +983,227 @@
 
 .seat.empty:hover .emptySeat {
   opacity: 1;
+}
+
+@media (hover: none) {
+  .seatKick {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 760px) {
+  .tableStage {
+    width: min(100%, 760px);
+    aspect-ratio: 1 / 1.12;
+    border-width: 5px;
+    outline-width: 1.5px;
+    box-shadow:
+      0 14px 32px rgba(80, 9, 12, 0.34),
+      inset 0 0 52px rgba(0, 0, 0, 0.26),
+      0 0 0 6px rgba(184, 29, 29, 0.34);
+  }
+
+  .tableCenter {
+    top: 46%;
+    width: 72%;
+    gap: 10px;
+  }
+
+  .communityRow {
+    gap: 5px;
+    height: auto;
+    min-height: 72px;
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .potChip {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .cardFlip,
+  .cardBack,
+  .cardSlot {
+    width: 44px;
+    height: 62px;
+    border-radius: 7px;
+  }
+
+  .seat {
+    width: 92px;
+    gap: 6px;
+  }
+
+  .seat.compact {
+    width: 84px;
+  }
+
+  .seatCards {
+    top: -48px;
+    gap: 2px;
+  }
+
+  .seatCards .cardFlip,
+  .seatCards .cardBack {
+    width: 36px;
+    height: 52px;
+    border-radius: 5px;
+  }
+
+  .avatarRing {
+    width: 52px;
+    height: 52px;
+    padding: 2px;
+  }
+
+  .seat.current .avatarRing {
+    box-shadow: 0 0 0 3px var(--hl-gold), 0 0 18px rgba(255, 215, 94, 0.7);
+  }
+
+  .dealerBadge {
+    width: 18px;
+    height: 18px;
+    font-size: 10px;
+  }
+
+  .hostBadge {
+    min-width: 28px;
+    height: 17px;
+    padding: 0 5px;
+    font-size: 9px;
+  }
+
+  .seatInfo {
+    margin-top: -8px;
+  }
+
+  .namePill,
+  .chipsPill {
+    max-width: 84px;
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+
+  .betTag {
+    top: 32px;
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+
+  .statusTag {
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .foldBanner {
+    top: -72px;
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .foldBurst {
+    top: -92px;
+    font-size: 9px;
+    padding: 5px 9px;
+  }
+
+  .tableNotice {
+    max-width: calc(100% - 16px);
+    gap: 7px;
+    padding: 6px 10px;
+  }
+
+  .tableNoticeLabel {
+    min-width: 40px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+
+  .tableNoticeText {
+    white-space: normal;
+    text-align: center;
+    font-size: 11px;
+  }
+
+  .actionBubble {
+    top: -34px;
+    padding: 5px 9px;
+    border-radius: 10px;
+    font-size: 10px;
+  }
+
+  .actionBar {
+    border-radius: 18px;
+    padding: 12px;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .actionLeft,
+  .actionRight {
+    width: 100%;
+  }
+
+  .actionRight {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .actionRight > .btn {
+    min-height: 46px;
+    width: 100%;
+  }
+
+  .actionInfo .title {
+    font-size: 15px;
+  }
+
+  .actionInfo .meta {
+    font-size: 11px;
+  }
+
+  .raiseBox {
+    grid-column: 1 / -1;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .quickRow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    justify-content: stretch;
+  }
+
+  .quickRow .btn {
+    min-height: 40px;
+    width: 100%;
+  }
+
+  .sliderRow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    justify-items: stretch;
+    padding: 10px;
+  }
+
+  .sliderRow input[type='range'] {
+    width: 100%;
+  }
+
+  .valuePill {
+    min-width: 0;
+    text-align: center;
+  }
+
+  .sliderRow .btn {
+    min-height: 44px;
+    width: 100%;
+  }
 }
